@@ -17,6 +17,15 @@ pub struct CloudItem {
     pub size: u64,
 }
 
+/// Provider-neutral path-bearing item returned by recursive/path searches.
+/// The provider-specific path listing types remain available when callers
+/// need backend-only fields.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CloudPathItem {
+    pub path: std::path::PathBuf,
+    pub item: CloudItem,
+}
+
 /// Provider-neutral conflict behavior for recursive transfers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConflictPolicy {
@@ -144,6 +153,15 @@ impl From<internxt::NativeItem> for CloudItem {
     }
 }
 
+impl From<internxt::PathListing> for CloudPathItem {
+    fn from(listing: internxt::PathListing) -> Self {
+        Self {
+            path: listing.path,
+            item: listing.item.into(),
+        }
+    }
+}
+
 impl CloudDrive for filen::FilenNativeClient {
     type Session = filen::FilenSession;
     type Error = anyhow::Error;
@@ -173,6 +191,15 @@ impl From<filen::NativeItem> for CloudItem {
     }
 }
 
+impl From<filen::NativePathListing> for CloudPathItem {
+    fn from(listing: filen::NativePathListing) -> Self {
+        Self {
+            path: listing.path,
+            item: listing.item.into(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,6 +215,44 @@ mod tests {
         });
         assert_eq!(item.uuid, "folder-1");
         assert!(item.is_dir);
+    }
+
+    #[test]
+    fn provider_path_listings_map_without_manual_item_translation() {
+        let internxt = CloudPathItem::from(internxt::PathListing {
+            path: "docs/readme.txt".into(),
+            item: internxt::NativeItem {
+                name: "readme.txt".into(),
+                uuid: "internxt-file".into(),
+                is_dir: false,
+                size: 12,
+                modified_at: None,
+            },
+        });
+        assert_eq!(internxt.path, std::path::Path::new("docs/readme.txt"));
+        assert_eq!(internxt.item.uuid, "internxt-file");
+
+        let filen = CloudPathItem::from(filen::NativePathListing {
+            path: "docs/readme.txt".into(),
+            item: filen::NativeItem {
+                uuid: "filen-file".into(),
+                name: "readme.txt".into(),
+                is_dir: false,
+                size: 12,
+                parent: "docs".into(),
+                file_key: None,
+                bucket: "bucket".into(),
+                region: "region".into(),
+                chunks: 1,
+                version: 3,
+                mime: "text/plain".into(),
+                created: 1,
+                modified: 2,
+                hash: "hash".into(),
+            },
+        });
+        assert_eq!(filen.path, std::path::Path::new("docs/readme.txt"));
+        assert_eq!(filen.item.uuid, "filen-file");
     }
 
     #[test]

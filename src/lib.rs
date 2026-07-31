@@ -13,6 +13,30 @@ use std::sync::Arc;
 pub use crisp_filen as filen;
 pub use crisp_internxt as internxt;
 
+/// Caller-owned storage for encoded session secrets.
+pub trait SecretStore {
+    fn load(&self, key: &str) -> anyhow::Result<Option<Vec<u8>>>;
+    fn store(&self, key: &str, secret: &[u8]) -> anyhow::Result<()>;
+}
+
+/// Store an already-encoded provider session through a caller-owned store.
+/// Encoded sessions contain bearer credentials and are sensitive.
+pub fn store_encoded_session(
+    store: &impl SecretStore,
+    key: &str,
+    encoded_session: &str,
+) -> anyhow::Result<()> {
+    store.store(key, encoded_session.as_bytes())
+}
+
+/// Load an encoded provider session from a caller-owned store.
+pub fn load_encoded_session(store: &impl SecretStore, key: &str) -> anyhow::Result<Option<String>> {
+    store
+        .load(key)?
+        .map(|bytes| String::from_utf8(bytes).map_err(Into::into))
+        .transpose()
+}
+
 /// Provider-neutral item information for callers that only need navigation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CloudItem {
@@ -208,6 +232,25 @@ impl From<filen::NativePathListing> for CloudPathItem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct MemoryStore(Mutex<BTreeMap<String, Vec<u8>>>);
+
+    impl SecretStore for MemoryStore {
+        fn load(&self, key: &str) -> anyhow::Result<Option<Vec<u8>>> {
+            Ok(self.0.lock().unwrap().get(key).cloned())
+        }
+
+        fn store(&self, key: &str, secret: &[u8]) -> anyhow::Result<()> {
+            self.0
+                .lock()
+                .unwrap()
+                .insert(key.to_owned(), secret.to_vec());
+            Ok(())
+        }
+    }
 
     #[test]
     fn provider_items_map_to_the_common_navigation_shape() {
@@ -274,5 +317,16 @@ mod tests {
         let error = CloudError::new(CloudErrorKind::Integrity, "digest mismatch");
         assert_eq!(error.kind, CloudErrorKind::Integrity);
         assert_eq!(error.message, "digest mismatch");
+    }
+
+    #[test]
+    fn encoded_sessions_use_caller_owned_secret_store() {
+        let store = MemoryStore::default();
+        assert_eq!(load_encoded_session(&store, "filen").unwrap(), None);
+        store_encoded_session(&store, "filen", "sensitive-session-json").unwrap();
+        assert_eq!(
+            load_encoded_session(&store, "filen").unwrap().as_deref(),
+            Some("sensitive-session-json")
+        );
     }
 }

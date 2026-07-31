@@ -39,6 +39,14 @@ at their own blocking boundary, such as `tokio::task::spawn_blocking`; the
 crate does not promise async portability or mix blocking calls into an async
 runtime implicitly.
 
+## Session secrets
+
+Session `encode()`/`decode()` remains available for CLI and test fixtures, but
+encoded sessions contain bearer credentials. Production callers should
+implement `SecretStore` and use `store_encoded_session`/
+`load_encoded_session` with an OS keychain or other protected secret manager.
+The crate does not write session files or select a persistence backend.
+
 ## Install either CLI
 
 ```sh

@@ -590,6 +590,36 @@ struct EncryptReader<R> {
     hash: Arc<Mutex<Sha256>>,
 }
 
+struct HashingWriter<W> {
+    writer: W,
+    hash: Sha256,
+}
+
+struct HashingReader<R> {
+    reader: R,
+    hash: Sha256,
+}
+
+impl<R: Read> Read for HashingReader<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let read = self.reader.read(buffer)?;
+        self.hash.update(&buffer[..read]);
+        Ok(read)
+    }
+}
+
+impl<W: Write> Write for HashingWriter<W> {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        let written = self.writer.write(buffer)?;
+        self.hash.update(&buffer[..written]);
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.writer.flush()
+    }
+}
+
 impl<R: Read> Read for EncryptReader<R> {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
         if self.remaining == 0 {
@@ -1429,9 +1459,61 @@ impl InternxtNativeClient {
         parent_folder_uuid: &str,
         plain_name: &str,
         file_type: &str,
-        mut reader: R,
+        reader: R,
         file_size: u64,
     ) -> Result<()> {
+        self.upload_reader_with_progress(
+            session,
+            parent_folder_uuid,
+            plain_name,
+            file_type,
+            reader,
+            file_size,
+            |_, _| {},
+        )
+        .map(|_| ())
+    }
+
+    /// Upload a reader and return the plaintext SHA-256 digest after the
+    /// gateway has accepted the file.
+    pub fn upload_reader_verified<R: Read>(
+        &self,
+        session: &InternxtSession,
+        parent_folder_uuid: &str,
+        plain_name: &str,
+        file_type: &str,
+        reader: R,
+        file_size: u64,
+    ) -> Result<String> {
+        let mut hashing = HashingReader {
+            reader,
+            hash: Sha256::new(),
+        };
+        self.upload_reader(
+            session,
+            parent_folder_uuid,
+            plain_name,
+            file_type,
+            &mut hashing,
+            file_size,
+        )?;
+        Ok(hex::encode(hashing.hash.finalize()))
+    }
+
+    /// Reader upload with plaintext byte progress. The returned SHA-256 is
+    /// computed from plaintext bytes before encryption and can be persisted
+    /// by callers as an end-to-end content verification value.
+    #[allow(clippy::too_many_arguments)]
+    pub fn upload_reader_with_progress<R: Read, F: FnMut(u64, u64)>(
+        &self,
+        session: &InternxtSession,
+        parent_folder_uuid: &str,
+        plain_name: &str,
+        file_type: &str,
+        mut reader: R,
+        file_size: u64,
+        mut progress: F,
+    ) -> Result<String> {
         let mut part_size = if file_size < self.transfer_config.multipart_min_size {
             file_size.max(1) as usize
         } else {
@@ -1515,6 +1597,7 @@ impl InternxtNativeClient {
             None
         };
         let mut sha = Sha256::new();
+        let mut plain_sha = Sha256::new();
         let mut etags = Vec::with_capacity(parts);
         for (part, url) in urls.iter().enumerate().take(parts) {
             let offset = part as u64 * part_size as u64;
@@ -1523,6 +1606,7 @@ impl InternxtNativeClient {
             reader
                 .read_exact(&mut encrypted)
                 .with_context(|| format!("reading upload part {}", part + 1))?;
+            plain_sha.update(&encrypted);
             crypt_at(&mut encrypted, &session.mnemonic, &bucket, &index, offset)?;
             sha.update(&encrypted);
             let response = self.put_with_retry(url, encrypted, part + 1, parts)?;
@@ -1536,6 +1620,7 @@ impl InternxtNativeClient {
                     .ok_or_else(|| anyhow!("Internxt part {} returned no ETag", part + 1))?;
                 etags.push(serde_json::json!({"PartNumber": part + 1, "ETag": etag}));
             }
+            progress(offset + length as u64, file_size);
         }
         let finish_url = format!(
             "{}/v2/buckets/{}/files/finish",
@@ -1579,7 +1664,7 @@ impl InternxtNativeClient {
             &create_url,
         )?;
         self.clear_listing_cache();
-        Ok(())
+        Ok(hex::encode(plain_sha.finalize()))
     }
 
     /// Stream a local file into Internxt without buffering the complete
@@ -1965,7 +2050,19 @@ impl InternxtNativeClient {
         &self,
         session: &InternxtSession,
         file_uuid: &str,
+        writer: W,
+    ) -> Result<u64> {
+        self.download_file_to_writer_with_progress(session, file_uuid, writer, |_, _| {})
+    }
+
+    /// Stream-decrypt with plaintext byte progress. The callback receives
+    /// `(completed_bytes, total_bytes)` after every bounded read.
+    pub fn download_file_to_writer_with_progress<W: Write, F: FnMut(u64, u64)>(
+        &self,
+        session: &InternxtSession,
+        file_uuid: &str,
         mut writer: W,
+        mut progress: F,
     ) -> Result<u64> {
         let metadata = self.file_metadata(file_uuid)?;
         let bucket_id = metadata
@@ -2016,6 +2113,7 @@ impl InternxtNativeClient {
                 .write_all(&buffer[..read])
                 .context("writing decrypted Internxt file")?;
             total += read as u64;
+            progress(total, expected);
         }
         if total != expected {
             return Err(anyhow!(
@@ -2024,6 +2122,21 @@ impl InternxtNativeClient {
         }
         writer.flush().context("flushing decrypted Internxt file")?;
         Ok(total)
+    }
+
+    /// Stream-decrypt while computing the plaintext SHA-256 digest.
+    pub fn download_file_to_writer_verified<W: Write>(
+        &self,
+        session: &InternxtSession,
+        file_uuid: &str,
+        writer: W,
+    ) -> Result<(u64, String)> {
+        let mut hashing = HashingWriter {
+            writer,
+            hash: Sha256::new(),
+        };
+        let total = self.download_file_to_writer(session, file_uuid, &mut hashing)?;
+        Ok((total, hex::encode(hashing.hash.finalize())))
     }
 
     pub fn download_file_to_path(

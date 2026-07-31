@@ -122,7 +122,7 @@ fn expired_bearer_token_refreshes_and_retries_once() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let server = thread::spawn(move || {
-        for attempt in 0..3 {
+        for attempt in 0..4 {
             let (mut stream, _) = listener.accept().unwrap();
             let path = request_path(&mut stream);
             match attempt {
@@ -137,12 +137,16 @@ fn expired_bearer_token_refreshes_and_retries_once() {
                         r#"{"token":"refreshed","newToken":"refreshed-new"}"#,
                     );
                 }
-                _ => {
+                2 => {
                     assert!(path.starts_with("/folders/content/root/folders"));
                     response(
                         &mut stream,
                         r#"{"result":[{"plainName":"Recovered","uuid":"dir"}]}"#,
                     );
+                }
+                _ => {
+                    assert!(path.starts_with("/folders/content/root/files"));
+                    response(&mut stream, r#"{"result":[]}"#);
                 }
             }
         }

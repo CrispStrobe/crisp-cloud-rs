@@ -552,6 +552,20 @@ impl FilenNativeClient {
         Self::new_inner(session)
     }
 
+    /// Validate the long-lived Filen API-key session.
+    ///
+    /// Filen does not expose a token-refresh endpoint: its API key is
+    /// intentionally long-lived. This hook mirrors the Python and Dart
+    /// clients so shared callers can invoke refresh uniformly; it performs
+    /// no network mutation. Authentication failures require a fresh login.
+    pub fn refresh_session(&self) -> Result<()> {
+        anyhow::ensure!(
+            !self.api_key.is_empty(),
+            "Filen session has no API key; login again"
+        );
+        Ok(())
+    }
+
     pub fn from_session_with_config(
         session: &FilenSession,
         transfer_config: TransferConfig,
@@ -2956,6 +2970,19 @@ mod tests {
             private_key: None,
             hmac_key: None,
         }
+    }
+
+    #[test]
+    fn refresh_session_validates_long_lived_api_key_without_network() {
+        let client =
+            FilenNativeClient::from_session(&test_session("http://127.0.0.1:1".into())).unwrap();
+        client.refresh_session().unwrap();
+
+        let mut invalid = test_session("http://127.0.0.1:1".into());
+        invalid.api_key.clear();
+        let client = FilenNativeClient::from_session(&invalid).unwrap();
+        let error = client.refresh_session().unwrap_err().to_string();
+        assert!(error.contains("login again"));
     }
 
     fn spawn_http_server(responses: Vec<String>) -> String {

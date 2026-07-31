@@ -31,10 +31,10 @@ consumers that need encrypted Filen transfers without spawning Python.
 ## Basic usage
 
 ```rust,no_run
-use crisp_filen::{FilenNativeClient, FilenSession};
+use crisp_filen::{FilenClient, FilenSession};
 
 fn download(session: &FilenSession, uuid: &str) -> anyhow::Result<Vec<u8>> {
-    let client = FilenNativeClient::from_session(session)?;
+    let client = FilenClient::from_session(session)?;
     let item = client.get_file(uuid)?;
     Ok(client.download_file(&item)?)
 }
@@ -43,10 +43,10 @@ fn download(session: &FilenSession, uuid: &str) -> anyhow::Result<Vec<u8>> {
 Transfer tuning is explicit:
 
 ```rust,no_run
-use crisp_filen::{FilenNativeClient, FilenSession, TransferConfig};
+use crisp_filen::{FilenClient, FilenSession, TransferConfig};
 
-fn configure(session: &FilenSession) -> anyhow::Result<FilenNativeClient> {
-    FilenNativeClient::from_session_with_config(
+fn configure(session: &FilenSession) -> anyhow::Result<FilenClient> {
+    FilenClient::from_session_with_config(
         session,
         TransferConfig {
             chunk_size: 4 * 1024 * 1024,
@@ -66,7 +66,7 @@ conflict handling, and serialized progress callbacks.
 
 ## Authentication and session storage
 
-`FilenNativeClient::login` performs the gateway login and returns a
+`FilenClient::login` performs the gateway login and returns a
 `FilenSession`. Store the result of `FilenSession::encode()` in a platform
 keychain or other protected secret store. Do not put passwords, API keys, or
 serialized sessions in source control or ordinary configuration files.
@@ -74,6 +74,9 @@ serialized sessions in source control or ordinary configuration files.
 When two-factor authentication is required, pass the six-digit code as the
 fourth login argument. If it is missing or incorrect, the returned error
 preserves Filen's `enter_2fa` or `wrong_2fa` code.
+
+`FilenNativeClient` is retained as a compatibility name for existing 0.x
+callers; it is an alias of `FilenClient`.
 
 ## Testing
 

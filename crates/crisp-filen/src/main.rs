@@ -28,6 +28,8 @@ enum Command {
         session: PathBuf,
         #[arg(default_value = ".")]
         path: PathBuf,
+        #[arg(long)]
+        fresh: bool,
     },
     Read {
         session: PathBuf,
@@ -66,6 +68,8 @@ enum Command {
         preserve_timestamps: bool,
         #[arg(long)]
         dry_run: bool,
+        #[arg(short, long)]
+        verbose: bool,
         #[arg(long, default_value_t = 1)]
         workers: usize,
         #[arg(long, default_value_t = 1)]
@@ -79,6 +83,8 @@ enum Command {
         preserve_timestamps: bool,
         #[arg(long)]
         dry_run: bool,
+        #[arg(short, long)]
+        verbose: bool,
         #[arg(long, default_value_t = 1)]
         workers: usize,
         #[arg(long, default_value_t = 1)]
@@ -123,6 +129,8 @@ enum Command {
     Search {
         session: PathBuf,
         pattern: String,
+        #[arg(long)]
+        max_depth: Option<usize>,
     },
     PermanentDelete {
         session: PathBuf,
@@ -161,11 +169,20 @@ fn run() -> Result<()> {
                 session.display()
             );
         }
-        Command::List { session, path } => {
+        Command::List {
+            session,
+            path,
+            fresh,
+        } => {
             let (client, value) = open(&session)?;
             let item = client.resolve_path(&value, &path)?;
             anyhow::ensure!(item.is_dir, "remote path is not a folder");
-            for entry in client.list_folder(&item.uuid)? {
+            let entries = if fresh {
+                client.list_folder_fresh(&item.uuid)?
+            } else {
+                client.list_folder(&item.uuid)?
+            };
+            for entry in entries {
                 print_item(&entry);
             }
         }
@@ -272,6 +289,7 @@ fn run() -> Result<()> {
             remote,
             preserve_timestamps,
             dry_run,
+            verbose,
             workers,
             file_workers,
         } => {
@@ -286,6 +304,9 @@ fn run() -> Result<()> {
             if dry_run {
                 println!("would upload {} to {}", local.display(), remote.display());
             } else {
+                if verbose {
+                    eprintln!("uploading {} to {}", local.display(), remote.display());
+                }
                 client.upload_path_with_timestamps(
                     &folder.uuid,
                     &name,
@@ -293,6 +314,9 @@ fn run() -> Result<()> {
                     &local,
                     preserve_timestamps,
                 )?;
+                if verbose {
+                    eprintln!("upload complete: {}", remote.display());
+                }
             }
         }
         Command::ReadTree {
@@ -301,6 +325,7 @@ fn run() -> Result<()> {
             out,
             preserve_timestamps,
             dry_run,
+            verbose,
             workers,
             file_workers,
         } => {
@@ -310,7 +335,13 @@ fn run() -> Result<()> {
             if dry_run {
                 println!("would download {} to {}", remote.display(), out.display());
             } else {
+                if verbose {
+                    eprintln!("downloading {} to {}", remote.display(), out.display());
+                }
                 client.download_path_with_timestamps(&item, &out, preserve_timestamps)?;
+                if verbose {
+                    eprintln!("download complete: {}", remote.display());
+                }
             }
         }
         Command::Delete { session, remote } => {
@@ -387,9 +418,13 @@ fn run() -> Result<()> {
             anyhow::ensure!(target.is_dir, "copy destination is not a folder");
             client.copy_item(&item, &target.uuid)?;
         }
-        Command::Search { session, pattern } => {
+        Command::Search {
+            session,
+            pattern,
+            max_depth,
+        } => {
             let (client, value) = open(&session)?;
-            for item in client.search(&value, &pattern)? {
+            for item in client.search_with_max_depth(&value, &pattern, max_depth)? {
                 print_item(&item);
             }
         }

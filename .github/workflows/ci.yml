@@ -1,0 +1,84 @@
+name: Rust workspace CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: cloud-rs-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_RETRY: "10"
+  CARGO_HTTP_MULTIPLEXING: "false"
+
+jobs:
+  quality:
+    name: Format, clippy, tests, packages
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Hermetic tests
+        run: cargo test --workspace --all-targets
+      - name: Package manifests
+        run: cargo package --workspace --locked
+
+  platform:
+    name: Build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: windows-2025
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+      - name: Cross-platform check
+        run: cargo check --workspace --all-targets --target ${{ matrix.target }}
+
+  live:
+    name: Ignored live tests
+    # Enable only after the repository secrets below have been configured.
+    # GitHub does not expose the secrets context directly in job conditions.
+    if: ${{ vars.RUN_CLOUD_LIVE_TESTS == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+      - name: Run authenticated live matrix
+        env:
+          INTERNXT_EMAIL: ${{ secrets.INTERNXT_EMAIL }}
+          INTERNXT_PASSWORD: ${{ secrets.INTERNXT_PASSWORD }}
+          FILEN_EMAIL: ${{ secrets.FILEN_EMAIL }}
+          FILEN_PASSWORD: ${{ secrets.FILEN_PASSWORD }}
+          FILEN_2FA: ${{ secrets.FILEN_2FA }}
+        run: |
+          test -n "$INTERNXT_EMAIL" && test -n "$INTERNXT_PASSWORD"
+          test -n "$FILEN_EMAIL" && test -n "$FILEN_PASSWORD"
+          cargo test --workspace --all-targets -- --ignored --nocapture --test-threads=1

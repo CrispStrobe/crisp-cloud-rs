@@ -703,6 +703,31 @@ impl InternxtNativeClient {
         &self.transfer_config
     }
 
+    /// Run one authenticated operation and, on an HTTP 401/expired-token
+    /// response, refresh the session and retry exactly once. The caller owns
+    /// persistence of the updated session.
+    pub fn with_auto_refresh<T, F>(
+        &mut self,
+        session: &mut InternxtSession,
+        mut operation: F,
+    ) -> Result<T>
+    where
+        F: FnMut(&Self, &InternxtSession) -> Result<T>,
+    {
+        let first = operation(self, session);
+        if !first.as_ref().err().is_some_and(is_expired_token_error) {
+            return first;
+        }
+        let refreshed = self.refresh_session(session)?;
+        self.bearer_token = if refreshed.new_token.is_empty() {
+            refreshed.token.clone()
+        } else {
+            refreshed.new_token.clone()
+        };
+        *session = refreshed;
+        operation(self, session)
+    }
+
     /// Return the default durable state location used by [`upload_path`].
     pub fn default_upload_resume_state_path(
         &self,
@@ -3417,6 +3442,14 @@ fn multipart_part_count_with_config(size: usize, config: &TransferConfig) -> usi
 fn shard_hash(encrypted: &[u8]) -> String {
     let sha = sha2::Sha256::digest(encrypted);
     hex::encode(<ripemd::Ripemd160 as RipemdDigest>::digest(sha))
+}
+
+fn is_expired_token_error(error: &anyhow::Error) -> bool {
+    let text = error.to_string().to_ascii_lowercase();
+    text.contains(" 401")
+        || text.contains("http 401")
+        || text.contains("unauthorized")
+        || text.contains("token expired")
 }
 
 fn item_name(item: &serde_json::Value, kind: &str) -> String {

@@ -436,6 +436,8 @@ dependencies = [
  "anyhow",
  "crisp-filen",
  "crisp-internxt",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

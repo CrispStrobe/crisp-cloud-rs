@@ -91,6 +91,14 @@ Authenticated tests are ignored by default because they create remote data.
 See each backend README for the required environment variables and cleanup
 behavior. Use a dedicated test account or test folder.
 
+## Releases
+
+The three crates are versioned together. Release verification runs from a
+`vX.Y.Z` tag and checks formatting, package metadata, MPL-2.0 license notices,
+and README install commands. Publishing is an explicit workflow dispatch and
+requires the repository `CRATES_API_TOKEN` secret; it publishes
+`crisp-internxt`, `crisp-filen`, then `crisp-cloud-rs`.
+
 ## Status
 
 The public API is `0.x` and may change between releases. The clients target

@@ -27,7 +27,9 @@ pub const DEFAULT_GATEWAY_URL: &str = "https://gateway.filen.io";
 pub const DEFAULT_INGEST_URL: &str = "https://ingest.filen.io";
 pub const DEFAULT_EGEST_URL: &str = "https://egest.filen.io";
 pub const CHUNK_SIZE: usize = 1024 * 1024;
-pub const TRANSFER_CONCURRENCY: usize = 4;
+/// Serial is the gateway-safe default; callers may opt into concurrency via
+/// [`FilenNativeClient::set_transfer_config`].
+pub const TRANSFER_CONCURRENCY: usize = 1;
 pub const LISTING_CACHE_TTL: Duration = Duration::from_secs(600);
 
 fn local_timestamps(metadata: &std::fs::Metadata) -> (i64, i64) {
@@ -70,7 +72,7 @@ impl Default for TransferConfig {
         Self {
             chunk_size: CHUNK_SIZE,
             workers: TRANSFER_CONCURRENCY,
-            file_workers: 4,
+            file_workers: 1,
             retries: 3,
             retry_backoff_ms: 250,
         }

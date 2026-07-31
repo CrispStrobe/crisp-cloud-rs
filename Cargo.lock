@@ -437,6 +437,7 @@ dependencies = [
 name = "crisp-cloud-rs"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "crisp-filen",
  "crisp-internxt",
 ]

@@ -11,6 +11,7 @@ keywords = ["cloud-storage", "internxt", "filen", "e2ee", "resumable-upload"]
 categories = ["api-bindings", "filesystem"]
 
 [dependencies]
+anyhow = "1"
 crisp-filen = { version = "0.1.0", path = "crates/crisp-filen" }
 crisp-internxt = { version = "0.1.0", path = "crates/crisp-internxt" }
 

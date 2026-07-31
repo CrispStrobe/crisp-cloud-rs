@@ -1,0 +1,6 @@
+/target/
+.env
+.env.*
+*.session.json
+*.resume.json
+*.internxt-resume.json

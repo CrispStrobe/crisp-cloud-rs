@@ -1,0 +1,23 @@
+[package]
+name = "crisp-cloud-rs"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+description = "Unofficial Rust clients for encrypted Internxt and Filen cloud drives"
+license = "MPL-2.0"
+repository = "https://github.com/CrispStrobe/crisp-cloud-rs"
+readme = "README.md"
+keywords = ["cloud-storage", "internxt", "filen", "e2ee", "resumable-upload"]
+categories = ["api-bindings", "filesystem"]
+
+[dependencies]
+crisp-filen = { version = "0.1.0", path = "crates/crisp-filen" }
+crisp-internxt = { version = "0.1.0", path = "crates/crisp-internxt" }
+
+[workspace]
+resolver = "2"
+members = ["crates/crisp-filen", "crates/crisp-internxt"]
+
+[lib]
+name = "crisp_cloud_rs"
+path = "src/lib.rs"

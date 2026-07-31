@@ -96,6 +96,10 @@ enum Command {
     },
     ListTrash {
         session: PathBuf,
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long, default_value_t = 50)]
+        limit: usize,
     },
     Mkdir {
         session: PathBuf,
@@ -322,9 +326,22 @@ fn run() -> Result<()> {
             let (client, _) = open(&session)?;
             client.restore(&uuid, &kind)?;
         }
-        Command::ListTrash { session } => {
+        Command::ListTrash {
+            session,
+            kind,
+            limit,
+        } => {
             let (client, _) = open(&session)?;
-            for entry in client.list_trash()? {
+            for entry in client
+                .list_trash()?
+                .into_iter()
+                .filter(|item| {
+                    kind.as_deref().is_none_or(|value| {
+                        (value == "folder" && item.is_dir) || (value == "file" && !item.is_dir)
+                    })
+                })
+                .take(limit)
+            {
                 print_item(&entry);
             }
         }

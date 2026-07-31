@@ -31,6 +31,14 @@ fn type_names() {
 }
 ```
 
+## Execution model
+
+The 0.x API is explicitly blocking-only. Both provider clients use blocking
+HTTP and do not create a Tokio runtime. Async applications should run calls
+at their own blocking boundary, such as `tokio::task::spawn_blocking`; the
+crate does not promise async portability or mix blocking calls into an async
+runtime implicitly.
+
 ## Install either CLI
 
 ```sh

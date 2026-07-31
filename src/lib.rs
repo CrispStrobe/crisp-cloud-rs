@@ -1,6 +1,11 @@
 //! Unofficial encrypted cloud-drive clients for Rust.
 //!
 //! Backend-specific APIs remain available through [`filen`] and [`internxt`].
+//! The public clients and facade are deliberately blocking-only in 0.x. They
+//! use `reqwest::blocking` and do not require or create a Tokio runtime. An
+//! async application should call these operations from its own blocking
+//! worker boundary (for example, `spawn_blocking`); this crate does not claim
+//! async portability until a separate async API is designed and tested.
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;

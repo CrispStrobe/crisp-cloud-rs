@@ -39,6 +39,10 @@ Encryption exports are decrypted by every other engine/backend. Results are
 compared with the independent oracle, so identical mistakes in both engines
 still fail. Missing cases, unexpected exports, rejected positive cases and
 Rust panics fail.
+Listings compare stable identity, displayed name, directory/file kind and size;
+provider-specific timestamp fields and session representations are outside this
+normalization. Byte results compare length and SHA-256, and randomized encrypted
+exports must decrypt to the independent expected bytes.
 Valid AES-128/192 ciphertext and short/long encryption keys must be rejected by
 the AES-256 APIs. Incremental CTR output must match a single continuous stream
 across multiple blocks and a partial final block.

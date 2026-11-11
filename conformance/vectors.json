@@ -1,0 +1,969 @@
+{
+  "schema": 1,
+  "generator": "Python hashlib + cryptography; fixed synthetic data only",
+  "cases": [
+    {
+      "id": "filen.login.v1.0",
+      "op": "filen.login",
+      "expected": {
+        "masterKey": "84e5a0a9257dbed2319f780e1a702c97f00352c6e05aa15ad6bb862365d6725d2ca4db6f9c63d6a5e82925583a8f75adf4fa54fee363968758ad31e9a1cc79cd",
+        "password": "84e5a0a9257dbed2319f780e1a702c97f00352c6e05aa15ad6bb862365d6725d2ca4db6f9c63d6a5e82925583a8f75adf4fa54fee363968758ad31e9a1cc79cd"
+      },
+      "password": "password",
+      "salt": "test-only-salt",
+      "version": 1
+    },
+    {
+      "id": "filen.login.v1.1",
+      "op": "filen.login",
+      "expected": {
+        "masterKey": "f6fd3bd6a030c4ef343f7280c83cce49f5aeb7671f0c5d92f75196865c1d3f926a5fc17bc8ee228fe3329bb4d7b001151323ad3f61b67a4dc9b9abb8fb399925",
+        "password": "f6fd3bd6a030c4ef343f7280c83cce49f5aeb7671f0c5d92f75196865c1d3f926a5fc17bc8ee228fe3329bb4d7b001151323ad3f61b67a4dc9b9abb8fb399925"
+      },
+      "password": "pässwörd 中文",
+      "salt": "test-only-salt",
+      "version": 1
+    },
+    {
+      "id": "filen.login.v2.0",
+      "op": "filen.login",
+      "expected": {
+        "masterKey": "84e5a0a9257dbed2319f780e1a702c97f00352c6e05aa15ad6bb862365d6725d",
+        "password": "d010bf3b836d7092c81d43038332705f4ec65bf3345f33208726a2f6b44ef97c8e116e80b15565738ad7030f0d364a394b852bde18a9c7aa8744d07ab3ec41db"
+      },
+      "password": "password",
+      "salt": "test-only-salt",
+      "version": 2
+    },
+    {
+      "id": "filen.login.v2.1",
+      "op": "filen.login",
+      "expected": {
+        "masterKey": "f6fd3bd6a030c4ef343f7280c83cce49f5aeb7671f0c5d92f75196865c1d3f92",
+        "password": "13f92f26b5d90e539dd283d31ba4cae95e65553a5f5fc3f3a8ea2c80b54aa955497e9a93474a35ba20a0a3966d26877ed1d683eb7c08491e564837b3650b644a"
+      },
+      "password": "pässwörd 中文",
+      "salt": "test-only-salt",
+      "version": 2
+    },
+    {
+      "id": "filen.metadata.encrypt.0",
+      "op": "filen.metadata.encrypt",
+      "expected": "002aaaaaaaaaaaaF6jGSiyXAPVWfLxQrVe3MA==",
+      "text": "",
+      "key": "conformance-only-master-key"
+    },
+    {
+      "id": "filen.metadata.decrypt.0",
+      "op": "filen.metadata.decrypt",
+      "expected": "",
+      "encrypted": "002aaaaaaaaaaaaF6jGSiyXAPVWfLxQrVe3MA==",
+      "key": "conformance-only-master-key"
+    },
+    {
+      "id": "filen.metadata.encrypt.1",
+      "op": "filen.metadata.encrypt",
+      "expected": "002aaaaaaaaaaaarwvD36CEG8AliqoB74Ev4XTq1Re8",
+      "text": "hello",
+      "key": "conformance-only-master-key"
+    },
+    {
+      "id": "filen.metadata.decrypt.1",
+      "op": "filen.metadata.decrypt",
+      "expected": "hello",
+      "encrypted": "002aaaaaaaaaaaarwvD36CEG8AliqoB74Ev4XTq1Re8",
+      "key": "conformance-only-master-key"
+    },
+    {
+      "id": "filen.metadata.encrypt.2",
+      "op": "filen.metadata.encrypt",
+      "expected": "002aaaaaaaaaaaagBxsDwwEQ81yT05XBCE1T+IzPuFwD/KWo8xx0l71HXP5O8o=",
+      "text": "Grüße 中文 🚀",
+      "key": "conformance-only-master-key"
+    },
+    {
+      "id": "filen.metadata.decrypt.2",
+      "op": "filen.metadata.decrypt",
+      "expected": "Grüße 中文 🚀",
+      "encrypted": "002aaaaaaaaaaaagBxsDwwEQ81yT05XBCE1T+IzPuFwD/KWo8xx0l71HXP5O8o=",
+      "key": "conformance-only-master-key"
+    },
+    {
+      "id": "filen.metadata.encrypt.3",
+      "op": "filen.metadata.encrypt",
+      "expected": "002aaaaaaaaaaaaqwfB1sX4R5/knoLW96scxRjb0fF7owlJm4y2OcYqfYIxJhf3yFvC",
+      "text": "line\ncarriage\r\tzero\u0000end",
+      "key": "conformance-only-master-key"
+    },
+    {
+      "id": "filen.metadata.decrypt.3",
+      "op": "filen.metadata.decrypt",
+      "expected": "line\ncarriage\r\tzero\u0000end",
+      "encrypted": "002aaaaaaaaaaaaqwfB1sX4R5/knoLW96scxRjb0fF7owlJm4y2OcYqfYIxJhf3yFvC",
+      "key": "conformance-only-master-key"
+    },
+    {
+      "id": "filen.metadata.reject.wrong-key",
+      "op": "filen.metadata.decrypt",
+      "expected": {
+        "status": "rejected"
+      },
+      "encrypted": "002aaaaaaaaaaaaqwfB1sX4R5/knoLW96scxRjb0fF7owlJm4y2OcYqfYIxJhf3yFvC",
+      "key": "wrong-key"
+    },
+    {
+      "id": "filen.metadata.reject.truncated",
+      "op": "filen.metadata.decrypt",
+      "expected": {
+        "status": "rejected"
+      },
+      "encrypted": "002",
+      "key": "conformance-only-master-key"
+    },
+    {
+      "id": "filen.metadata.reject.invalid-base64",
+      "op": "filen.metadata.decrypt",
+      "expected": {
+        "status": "rejected"
+      },
+      "encrypted": "002aaaaaaaaaaaa!!!",
+      "key": "conformance-only-master-key"
+    },
+    {
+      "id": "filen.metadata.reject.unknown-version",
+      "op": "filen.metadata.decrypt",
+      "expected": {
+        "status": "rejected"
+      },
+      "encrypted": "999aaaaaaaaaaaaqwfB1sX4R5/knoLW96scxRjb0fF7owlJm4y2OcYqfYIxJhf3yFvC",
+      "key": "conformance-only-master-key"
+    },
+    {
+      "id": "filen.metadata.reject.unicode-nonce",
+      "op": "filen.metadata.decrypt",
+      "expected": {
+        "status": "rejected"
+      },
+      "encrypted": "002aéééééééééééqwfB1sX4R5/knoLW96scxRjb0fF7owlJm4y2OcYqfYIxJhf3yFvC",
+      "key": "conformance-only-master-key"
+    },
+    {
+      "id": "filen.chunk.0",
+      "op": "filen.chunk",
+      "expected": {
+        "length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "size": 0,
+      "key": "303132333435363738396162636465666768696a6b6c6d6e6f70717273747576",
+      "export": true,
+      "encrypted": "YWFhYWFhYWFhYWFhGyXqeTj4n3n773uYUu9WrQ=="
+    },
+    {
+      "id": "filen.chunk.1",
+      "op": "filen.chunk",
+      "expected": {
+        "length": 1,
+        "sha256": "8f11b05da785e43e713d03774c6bd3405d99cd3024af334ffd68db663aa37034"
+      },
+      "size": 1,
+      "key": "303132333435363738396162636465666768696a6b6c6d6e6f70717273747576",
+      "export": true,
+      "encrypted": "YWFhYWFhYWFhYWFh/myWnxVIkRvyJWhCuc/x2HU="
+    },
+    {
+      "id": "filen.chunk.15",
+      "op": "filen.chunk",
+      "expected": {
+        "length": 15,
+        "sha256": "416e54f66163781b724adba0ee5504988367a22c7534ca0f80790718bd0d090c"
+      },
+      "size": 15,
+      "key": "303132333435363738396162636465666768696a6b6c6d6e6f70717273747576",
+      "export": true,
+      "encrypted": "YWFhYWFhYWFhYWFh/lAixqmVr4xzzkbDUhrPqDqXFBA8190Tuq8eehOonw=="
+    },
+    {
+      "id": "filen.chunk.16",
+      "op": "filen.chunk",
+      "expected": {
+        "length": 16,
+        "sha256": "8bb7b0ec06cc5a9cffba45c26c1af5f5a05c4d49a647c3889f3e9a77c589a8d2"
+      },
+      "size": 16,
+      "key": "303132333435363738396162636465666768696a6b6c6d6e6f70717273747576",
+      "export": true,
+      "encrypted": "YWFhYWFhYWFhYWFh/lAixqmVr4xzzkbDUhrPNZPTN7804ZoIFFs018sT2Pk="
+    },
+    {
+      "id": "filen.chunk.17",
+      "op": "filen.chunk",
+      "expected": {
+        "length": 17,
+        "sha256": "0d74f71744cebfec039589a9fc8bde43f4cd179d793f6e70d8d73c067456835e"
+      },
+      "size": 17,
+      "key": "303132333435363738396162636465666768696a6b6c6d6e6f70717273747576",
+      "export": true,
+      "encrypted": "YWFhYWFhYWFhYWFh/lAixqmVr4xzzkbDUhrPNZWrmQeDnmzGYoMn55nuqVaW"
+    },
+    {
+      "id": "filen.chunk.65535",
+      "op": "filen.chunk",
+      "expected": {
+        "length": 65535,
+        "sha256": "d01af5f3ac02ef7e55c53226b250b4741ce0758c9e1a03b686e83d3772e8711f"
+      },
+      "size": 65535,
+      "key": "303132333435363738396162636465666768696a6b6c6d6e6f70717273747576",
+      "export": true,
+      "encrypted_file": "generated/filen.chunk.65535.bin"
+    },
+    {
+      "id": "filen.chunk.65536",
+      "op": "filen.chunk",
+      "expected": {
+        "length": 65536,
+        "sha256": "19b5fa6ac4854462f2ab19bb281f22589e88aa559c6efe7cf74e6b7d674ef07e"
+      },
+      "size": 65536,
+      "key": "303132333435363738396162636465666768696a6b6c6d6e6f70717273747576",
+      "export": true,
+      "encrypted_file": "generated/filen.chunk.65536.bin"
+    },
+    {
+      "id": "filen.chunk.65537",
+      "op": "filen.chunk",
+      "expected": {
+        "length": 65537,
+        "sha256": "824a117f2165da15ed70f7dfd516f348083e9092b59d9bb7e34f28e99a6778e6"
+      },
+      "size": 65537,
+      "key": "303132333435363738396162636465666768696a6b6c6d6e6f70717273747576",
+      "export": true,
+      "encrypted_file": "generated/filen.chunk.65537.bin"
+    },
+    {
+      "id": "filen.chunk.1048593",
+      "op": "filen.chunk",
+      "expected": {
+        "length": 1048593,
+        "sha256": "e235f163785013b3588ab0f97f24b57603a21013fbfbd70bdda1fe32a4c84987"
+      },
+      "size": 1048593,
+      "key": "303132333435363738396162636465666768696a6b6c6d6e6f70717273747576",
+      "export": true,
+      "encrypted_file": "generated/filen.chunk.1048593.bin"
+    },
+    {
+      "id": "filen.chunk.reject.empty",
+      "op": "filen.chunk.decrypt",
+      "expected": {
+        "status": "rejected"
+      },
+      "encrypted": "",
+      "key": "303132333435363738396162636465666768696a6b6c6d6e6f70717273747576"
+    },
+    {
+      "id": "filen.chunk.reject.short",
+      "op": "filen.chunk.decrypt",
+      "expected": {
+        "status": "rejected"
+      },
+      "encrypted": "YWFhYWFhYWFhYWE=",
+      "key": "303132333435363738396162636465666768696a6b6c6d6e6f70717273747576"
+    },
+    {
+      "id": "filen.chunk.reject.missing-tag",
+      "op": "filen.chunk.decrypt",
+      "expected": {
+        "status": "rejected"
+      },
+      "encrypted": "YWFhYWFhYWFhYWFhgR134J3dNKo=",
+      "key": "303132333435363738396162636465666768696a6b6c6d6e6f70717273747576"
+    },
+    {
+      "id": "filen.chunk.reject.tampered",
+      "op": "filen.chunk.decrypt",
+      "expected": {
+        "status": "rejected"
+      },
+      "encrypted": "YWFhYWFhYWFhYWFhgR134J3dNKp+fq1JfBfRktF6W3Je",
+      "key": "303132333435363738396162636465666768696a6b6c6d6e6f70717273747576"
+    },
+    {
+      "id": "filen.chunk.reject.wrong-key",
+      "op": "filen.chunk.decrypt",
+      "expected": {
+        "status": "rejected"
+      },
+      "encrypted": "YWFhYWFhYWFhYWFhgR134J3dNKp+fq1JfBfRktF6W3Jf",
+      "key": "7878787878787878787878787878787878787878787878787878787878787878"
+    },
+    {
+      "id": "filen.chunk.reject.key-16",
+      "op": "filen.chunk.decrypt",
+      "expected": {
+        "status": "rejected"
+      },
+      "encrypted": "YWFhYWFhYWFhYWFhgR134J3dNKp+fq1JfBfRktF6W3Jf",
+      "key": "78787878787878787878787878787878"
+    },
+    {
+      "id": "filen.chunk.reject.key-31",
+      "op": "filen.chunk.decrypt",
+      "expected": {
+        "status": "rejected"
+      },
+      "encrypted": "YWFhYWFhYWFhYWFhgR134J3dNKp+fq1JfBfRktF6W3Jf",
+      "key": "78787878787878787878787878787878787878787878787878787878787878"
+    },
+    {
+      "id": "filen.chunk.reject.key-33",
+      "op": "filen.chunk.decrypt",
+      "expected": {
+        "status": "rejected"
+      },
+      "encrypted": "YWFhYWFhYWFhYWFhgR134J3dNKp+fq1JfBfRktF6W3Jf",
+      "key": "787878787878787878787878787878787878787878787878787878787878787878"
+    },
+    {
+      "id": "internxt.password.0",
+      "op": "internxt.password",
+      "expected": "4f8d654f25ed46c53b94e7e63b718b971998767901a6ca97daff07eaff3755f5",
+      "password": "password",
+      "salt": "0102030405060708"
+    },
+    {
+      "id": "internxt.password.1",
+      "op": "internxt.password",
+      "expected": "9c98778dd4b0b9f00fd3430131e1ef99a7771d0276b3ef74a31fc6c333aca601",
+      "password": "pässwörd 中文",
+      "salt": "0102030405060708"
+    },
+    {
+      "id": "internxt.password.2",
+      "op": "internxt.password",
+      "expected": "f5ce70372001a480dc302ca5b89d57bc90007224775f9dfc546eff152e3b2b49",
+      "password": "",
+      "salt": "0102030405060708"
+    },
+    {
+      "id": "internxt.password.reject.x",
+      "op": "internxt.password",
+      "expected": {
+        "status": "rejected"
+      },
+      "password": "password",
+      "salt": "x"
+    },
+    {
+      "id": "internxt.password.reject.123",
+      "op": "internxt.password",
+      "expected": {
+        "status": "rejected"
+      },
+      "password": "password",
+      "salt": "123"
+    },
+    {
+      "id": "internxt.text.decrypt.0",
+      "op": "internxt.text.decrypt",
+      "expected": "",
+      "encrypted": "53616c7465645f5f0102030405060708e32a6f4b0d6dfb2b33c7c99fca07b1f3",
+      "key": "test-only-app-secret"
+    },
+    {
+      "id": "internxt.text.roundtrip.0",
+      "op": "internxt.text.roundtrip",
+      "expected": "",
+      "text": "",
+      "key": "test-only-app-secret",
+      "export": true,
+      "known_difference": "Dart PointyCastle cannot encrypt an empty text",
+      "engine_expected": {
+        "dart": {
+          "status": "rejected"
+        }
+      }
+    },
+    {
+      "id": "internxt.text.decrypt.1",
+      "op": "internxt.text.decrypt",
+      "expected": "hello",
+      "encrypted": "53616c7465645f5f01020304050607086d6e313b0f8d0b85f9856c3a24e24176",
+      "key": "test-only-app-secret"
+    },
+    {
+      "id": "internxt.text.roundtrip.1",
+      "op": "internxt.text.roundtrip",
+      "expected": "hello",
+      "text": "hello",
+      "key": "test-only-app-secret",
+      "export": true
+    },
+    {
+      "id": "internxt.text.decrypt.2",
+      "op": "internxt.text.decrypt",
+      "expected": "Grüße 中文 🚀",
+      "encrypted": "53616c7465645f5f0102030405060708b3dfb22d2717e3201e2b3d6477af29834378e3cadb90d70ecf924fb8485513ec",
+      "key": "test-only-app-secret"
+    },
+    {
+      "id": "internxt.text.roundtrip.2",
+      "op": "internxt.text.roundtrip",
+      "expected": "Grüße 中文 🚀",
+      "text": "Grüße 中文 🚀",
+      "key": "test-only-app-secret",
+      "export": true
+    },
+    {
+      "id": "internxt.text.decrypt.3",
+      "op": "internxt.text.decrypt",
+      "expected": "line\ncarriage\r\tzero\u0000end",
+      "encrypted": "53616c7465645f5f0102030405060708ddcb5127788bf01dedd879c529bc4739c19ebd0c8511a00ef086eefe95d5adb1",
+      "key": "test-only-app-secret"
+    },
+    {
+      "id": "internxt.text.roundtrip.3",
+      "op": "internxt.text.roundtrip",
+      "expected": "line\ncarriage\r\tzero\u0000end",
+      "text": "line\ncarriage\r\tzero\u0000end",
+      "key": "test-only-app-secret",
+      "export": true
+    },
+    {
+      "id": "internxt.text.reject.short",
+      "op": "internxt.text.decrypt",
+      "expected": {
+        "status": "rejected"
+      },
+      "encrypted": "00",
+      "key": "test-only-app-secret"
+    },
+    {
+      "id": "internxt.text.reject.not-hex",
+      "op": "internxt.text.decrypt",
+      "expected": {
+        "status": "rejected"
+      },
+      "encrypted": "zz",
+      "key": "test-only-app-secret"
+    },
+    {
+      "id": "internxt.text.reject.invalid-length",
+      "op": "internxt.text.decrypt",
+      "expected": {
+        "status": "rejected"
+      },
+      "encrypted": "53616c7465645f5f01020304050607086d6e313b0f8d0b85f9856c3a24e241",
+      "key": "test-only-app-secret"
+    },
+    {
+      "id": "internxt.text.reject.bad-magic",
+      "op": "internxt.text.decrypt",
+      "expected": {
+        "status": "rejected"
+      },
+      "encrypted": "496e76616c69642101020304050607086d6e313b0f8d0b85f9856c3a24e24176",
+      "key": "test-only-app-secret",
+      "known_difference": "Dart does not validate the Salted__ header",
+      "engine_expected": {
+        "dart": {
+          "status": "ok",
+          "value": "hello"
+        }
+      }
+    },
+    {
+      "id": "internxt.text.encoding.utf8",
+      "op": "internxt.text.decrypt",
+      "expected": "Grüße",
+      "encrypted": "53616c7465645f5f010203040506070849ebb641895191f0066f68f29b24e17a",
+      "key": "sécret",
+      "known_difference": "Legacy text secret encoding differs: Dart Latin-1, Rust UTF-8",
+      "engine_expected": {
+        "dart": {
+          "status": "rejected"
+        }
+      }
+    },
+    {
+      "id": "internxt.text.encoding.latin1",
+      "op": "internxt.text.decrypt",
+      "expected": "Grüße",
+      "encrypted": "53616c7465645f5f01020304050607088e65aec445ffeb8f2808c778257112e7",
+      "key": "sécret",
+      "known_difference": "Legacy text secret encoding differs: Dart Latin-1, Rust UTF-8",
+      "engine_expected": {
+        "rust": {
+          "status": "rejected"
+        }
+      }
+    },
+    {
+      "id": "internxt.key.0",
+      "op": "internxt.key",
+      "expected": "28e4b2556ec14340a7b4b6613e2c4fbca3612df771f3b2776659ec0ee651bdb2",
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "internxt.ctr.0.0",
+      "op": "internxt.ctr",
+      "expected": {
+        "length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "size": 0,
+      "export": true,
+      "encrypted": "",
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "internxt.ctr.0.1",
+      "op": "internxt.ctr",
+      "expected": {
+        "length": 1,
+        "sha256": "8f11b05da785e43e713d03774c6bd3405d99cd3024af334ffd68db663aa37034"
+      },
+      "size": 1,
+      "export": true,
+      "encrypted": "ag==",
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "internxt.ctr.0.15",
+      "op": "internxt.ctr",
+      "expected": {
+        "length": 15,
+        "sha256": "416e54f66163781b724adba0ee5504988367a22c7534ca0f80790718bd0d090c"
+      },
+      "size": 15,
+      "export": true,
+      "encrypted": "avuYycAyq6dWtJj/3ZCA",
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "internxt.ctr.0.16",
+      "op": "internxt.ctr",
+      "expected": {
+        "length": 16,
+        "sha256": "8bb7b0ec06cc5a9cffba45c26c1af5f5a05c4d49a647c3889f3e9a77c589a8d2"
+      },
+      "size": 16,
+      "export": true,
+      "encrypted": "avuYycAyq6dWtJj/3ZCAng==",
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "internxt.ctr.0.17",
+      "op": "internxt.ctr",
+      "expected": {
+        "length": 17,
+        "sha256": "0d74f71744cebfec039589a9fc8bde43f4cd179d793f6e70d8d73c067456835e"
+      },
+      "size": 17,
+      "export": true,
+      "encrypted": "avuYycAyq6dWtJj/3ZCAnhU=",
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "internxt.ctr.0.65535",
+      "op": "internxt.ctr",
+      "expected": {
+        "length": 65535,
+        "sha256": "d01af5f3ac02ef7e55c53226b250b4741ce0758c9e1a03b686e83d3772e8711f"
+      },
+      "size": 65535,
+      "export": true,
+      "encrypted_file": "generated/internxt.ctr.0.65535.bin",
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "internxt.ctr.0.65536",
+      "op": "internxt.ctr",
+      "expected": {
+        "length": 65536,
+        "sha256": "19b5fa6ac4854462f2ab19bb281f22589e88aa559c6efe7cf74e6b7d674ef07e"
+      },
+      "size": 65536,
+      "export": true,
+      "encrypted_file": "generated/internxt.ctr.0.65536.bin",
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "internxt.ctr.0.65537",
+      "op": "internxt.ctr",
+      "expected": {
+        "length": 65537,
+        "sha256": "824a117f2165da15ed70f7dfd516f348083e9092b59d9bb7e34f28e99a6778e6"
+      },
+      "size": 65537,
+      "export": true,
+      "encrypted_file": "generated/internxt.ctr.0.65537.bin",
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "internxt.ctr.0.1048593",
+      "op": "internxt.ctr",
+      "expected": {
+        "length": 1048593,
+        "sha256": "e235f163785013b3588ab0f97f24b57603a21013fbfbd70bdda1fe32a4c84987"
+      },
+      "size": 1048593,
+      "export": true,
+      "encrypted_file": "generated/internxt.ctr.0.1048593.bin",
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "internxt.range.0.0",
+      "op": "internxt.range",
+      "expected": {
+        "length": 1031,
+        "sha256": "89062d81fd2dc0a80b7073d1cae17898301abcdcdae0d2fb1765c559d35dc4e5"
+      },
+      "encrypted": "avuYycAyq6dWtJj/3ZCAnhU4ZnqpcppUJMkkjPEfouzqtIW3aCQE6vGB1qcXJPj6fm8eiW8zRq0nl/B20/bC7oPKNfntJl1+nKSgU21PKA/hzXNUUNpPsfT+ekwIibM6rZFI3ppzKXBKdkkxS3ZOG+WeVnoY2Jdl81D9ynQ1T3sO+VTvj83p9Y5OORYZk3F8H3u72uvPTCiPNzANmWDHZm4Zao0jSqx35IKxifGZsPY76Smuzd+t4wNAwq6bA7/DLQHey9XKLthRx2eYRpDNXYutUHreUWa7KlQBKbXmjQNqqEq3N5HwyxSceSZbc2BH/1Y1E6BntbhNlQ0jEwsmRGI8i7h2K1X4F9BXD/chRgPFOZZ8liQkUQavgiQhebRcjifcuYPI1eWEKbmUfNzein+b+xY/L06VrnsOOLJF90wtO8l5drdRC7BDikLKawzU0Gfrs/UKhO0hhXdmxSTqkx0V8DHj18e5P0wK7L7JUyhLjZLXxZq8v0l9iUWAS36FpF0vXihFWioMw8Bt4ml0wU4vYlCDfQl+AhGMzL0Q8VaeUpN3nqwG8WRWw35/oeXU9HqNy31M36TXHuTe8yF2o2FSbjcXPls5LBXa6GZb490mtxBwUhJcPAyDd0Apn/ED2y4hg36BCQWeSfp3l/28e0JTIqIAZkx2jr8fpFrfbqKSYUfiCtRe5ODOl+9EnCwoBYsBftqBBfpOflU7oPDFLWkPzD9hPMrj5IYIJxsmZXmsrc7lV6jPKpie57nAEtne/qgLFnQVC/vQqXJtiZMIK2OyIdbeJB3j662wEIuSsAM5pGuQ3u4OwTRfi4YUdOKH2l3Qb8gfyu2AytLB4t6V1aFgvDH5hMUptuzu0zqXqVWQ515Y/4eCza13VUJYpwDSPOfe4kuxZLdH/LF4K/9kn6zdwassMThNuntuyO/6UgOnh3SKAAFSkYv3y/QIAvgN3+agIJP3bSnOuMyNRrDfs/S9/zMn64kbt5IS4kB0LGyvmpMn6vahEMRTVg9OTRGNHC8upGL7TFJHl86D0tdcRlMl/cI6wwfFu7Zh5aM+JGJd5P3wJJ6Qs0PT2Ujoyx+Eyx+vFmendu2WTal8GpjVyDmCWQYeOUF5SlwZkduhlhNgGWaccwZgLZRz6qX/5avtaB44KMF3lbEu1WO2wshADWysTkVTnpeuTlcpK8ez31NWUmwwSQgl/4pGwHXEAfsH7KRe3pfvpjH+pJEcCY/2OxzgEqvPqXz6SDwX1Sz9zx0CVoKYAXH875y8TNOmVIBKzMocFi9YsPA0rxFRAuEzkgWIAYhLvmAgKmc9XfLXySZ8NeKq1M4aVLqmIclmifKaSPYZCb2Vwn9Pbba8KR6bUXysQqaUXgU=",
+      "offset": 0,
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "internxt.range.0.16",
+      "op": "internxt.range",
+      "expected": {
+        "length": 1031,
+        "sha256": "89062d81fd2dc0a80b7073d1cae17898301abcdcdae0d2fb1765c559d35dc4e5"
+      },
+      "encrypted": "Li0Rb4KfdXkPvDO56uW3x4fbqJydMzHxjJ7rQf0J049pWgV0cA5d2DCiHmHm7b/xvtHA7thNMFGxQr9udjo/OgogXHk7z3ikCulPJ2WmntG4pl2lh0zPlmVbIiR8Y7UG2oMtby82glLmK+D1ac5aTBuSecBp0Nbo9VsOA/K+XhF0Tqwk/vhZQ6IY3easd7J9UwaMoAwnx0Lzd6q07uSrw9EHHLm4xJD8/lv3ue4okik2PMG2zv85LXrqCPVthTdGvrolUfO+i5A/IxQSqBymLgXFYaLAhMvWa4FCzLFYdTDqbSjsvVygz1i+5zYoFllZWSl8rV1GOtU8Kko04lZTKCjWu1fjMxFK/LqpSU5Un6mZEsfEnPUzD6kCzINJxyOVQoCOAQrBWaC1BhEFqbDgeUZW5lSQqGwQxVS/qSdEIb/FUP5N4j/vgA6onHPyMZGOIvMWHs680o4qtxfTo7JGH6WYpcK+h4Oismi+UOtmUWO5YjIlPXJPwSHsrQbXforUeToJfayQ4ksVZJfxovbcefM5pmBrtzvuGU32lJGU8qHvR5I2ZnnI0fwzDsXOPgu4VEWbHDpRNhI578HdcS7I8MlaO2UlB2ch9qhaL0S05PTOFTz8Y7rj77VcjWKs4ENmeUZVtyuMWU2TwAKfTyh7if8OasnwyWXxl9u8AquxB10SvhqEz6polWNVoCyV67gyVOkmEkpJ3db/excaAFNyTEK6+/4qt/IxbYnS0q099DjhlRBjYyDgFv+EGXi+hvY8VtlM+fPPCNT+1q0vbXSfLlKxXIUl8zHcT0q8aAFD9/zHYs2U3Sjfhq3lNNzdw+7AlnVXHNbprhyhEvvkL/yEen0Ma0+KnL/SS1p6LzOSFycn2sGfUISOWXLrxGMW4JmEmcq0gAHbI3ClBnX9+A95LsjqX5/6GmeG/tzmG+Up7XrK3b3auNoCROWtO5h9raCuz1cVGDKcnCCqbQ/ZVQM5R0WPqDqV65oFM0Z9YiFgOncBFDvTd9ChvWq8u5TnzKZTeEiS7xE2EPCgy37YRdQJSSjzyOvZga2oNsTspv/+BPnUIrTjcJIdgLlgT2Mng6DfDGm0KTNSVE5fog6ksMy5PosMUYkIG1/LclzHzurSvhZ1ISVT1EB7pBnAGKv91bsYW7klaHx4ipFTLDwc0ljyfDs5WSe3HRLq4WvvmC807HL3mUE4usDLWsuzZAc0kIsgKQr8ntjcZ8dXwQzgO4jkMOhNv4d8asn4aZdhvMt/lbDX/wtjBHVfHR+6ZkQ5/Mm5KOdso15JdRs3GCBmGD3iMwsg2bcr0yFBzbMKI3Oy7+VVzQz+qL6vEGJGTKESC+xEV0Gti78rEovz8nyZYzLM38CJXk/pooE=",
+      "offset": 16,
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "internxt.range.0.65536",
+      "op": "internxt.range",
+      "expected": {
+        "length": 1031,
+        "sha256": "89062d81fd2dc0a80b7073d1cae17898301abcdcdae0d2fb1765c559d35dc4e5"
+      },
+      "encrypted": "HC0cP3ENDQWVItvJtaOv8/XT7YGI6J4uBEXnUa5JTCIirqEeCbPEFbDfVRocC7XNk1epRaBuRLMGnGhiA5roVY2fo7btpjMO2Qmk2nqUMEH42yUgA9i752/wZJTHTXwu7x+d0mxkfWNWiKCP6QzjJhFX5ZVvmP3RH/vlcIica3oVnDVxuMoHgc7ZJ+mQJs2vjeqBw8LgBYVo18n5nwJF89yfxDSEf5CStjxawRquBdqyY3iHud0kVqq8btkQ0Y8VS6Ww9YedUN3Hf5rnzB4HcyBfZuZxfvMyI8X6Ey5yu9uDIq4++cjlhe49+x7lRvHElaRvnKI8W+l+SsVVz+c/QDDPVeYO2bYsbJihcwT4JJLSgsevzlvT8Rnu2AQmvJOs525Hwv0is4UyagnhN5t9UgW+AZZZ4bRLnEy7stWwXCRHCquPDWSuDyV5K/aG5bFqFq72Oki8qzQoUDfskCJBk9RiSL08ULV9/gXn0PFQuteuHiUU2rj94v7QT7FamrptrmTIwh+zfMtlXeK50uqVYE9vq/m1vWm1oFqRu9cvN4CpdPtntwvhpl3nfDXzuC4az1+rtTp0qVB1lyWlzM2djmYnh9kDNyvvLBhzEt5IYpfWYnEvV1fxaKXqCIl0mRCpB5haAyDdMKKPIlBwCy6WQzTvUBNwk2bcZetrwtQ9WpSN0u/s+udoZdVXTirv9kuLJXPacdADHUPuTpxrrYQDGGKkxzlejpHlDbgWq1t6OvOZXZo14jxBsGM3Cndbh19KRnuVhVNQDjJqnbCC+kwjuEIpKAtklXHSRJNG38ewA3CYSqxTSgnEjzXY3lnJPh/2f5OQ5N8F7sI5xOxaNpKdWSEDQwptvBqV13gV7C17BXEqCiSbppy8WxwReVosH64Nja9pMcAarYEBCHP1xxLmGrKzdJToLmZes/676hp9Amj7m9L03p1QRxrbCOVd+N1GYi3KJ6hdpmyHOrUw01fegESMQ7YoNH3G79ioUE0DYrETtNmxFDFtTKStD/MVofIyxlRauPxc4a/Yz4Zs79xM0nYMK+llsVZmzxgv0mYDrO8gvRLF0GXkME5BUanjrZ2cZ1K3m4gYBLUQ8p6/relHmtSwBTMrhiJYMILn7J+g6E59O19RpCrNwAEFiM3Fl8gm3vZd7enAO20oTgC2ouE34cohwB5tP0i85xdFCAdUMtt6PuQqEsaqnChoDalkNK2M5V2tzzuLt7PpT8QlH4nFrgbc0QSPNoqQiXi3U/zecIsXrs1tSF5VnW4lIDQJI7wX0X7YKhhPbbIiuB7fZv+zHPM73NVXkgvb/KoOtSrnG0RT+niGsj5wBDjHBbkCIWGKTiBBGggJL/mh5Gr9iMG+4GBHy022fs8=",
+      "offset": 65536,
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "internxt.range.0.4294967296",
+      "op": "internxt.range",
+      "expected": {
+        "length": 1031,
+        "sha256": "89062d81fd2dc0a80b7073d1cae17898301abcdcdae0d2fb1765c559d35dc4e5"
+      },
+      "encrypted": "01yyHNFPro39t1B9++EvYWdZELL4uDQtHckn3ffEH9Ue35hVV+mzn6LsFGO/y9epp62xwjCAPJUkfHFYsTK3UXd+uS6YOzpW8JT0KgN8z1FDTey2MID4w7UqQmPs+RARLVAQE5OeBR4UbQMSsuVtnMB7YGomUDfWKe7IKFdseZx0OYQTXlJjVAQIbfhAQlSmXdQ8B/zTr1j5Xk0ORXKTGSouu9x2yqALKjn0ZHKM6VcNmczNLSDjgWM39e9zjjkWQTrT/5T0Lv34d8fWHLW13tSUptDmlU7ggc0rM+sliEj/gZoiac6Q5MPwTKbAxRIdHtjCn9QE2bdRXAMK+qfHX4OIBx9fJlgLQeT5wtru2mZqewtUZAOkJFzMwX3v6si9JK1MgKQuRlRAxdfCL3P1SCpiYnADIVshpoPwvwClFVrMafbvbqu2dgS8Xw28DRwaBtSeAl5O5hpxf+O1rmRLsdUo1qMPyYxZEUn6k0Osq8P+ygd2DFuM+pp/1G6ElhcB8j6cLLhoXobzf+himIY7GjiCHS2PXZxf3BITb6uqTZrytmDdfX6wvKS7JMwPPyVcqed7GwhD0/oyeZP/PkNWY8YnOzR8hxpU+V0i+Nodxla7wYpk2U019G/hFRv3OJ6L55Ai9zy3VeFDXfgwQyTG6chCRue8UW9KC3jb+CD82S5AgCZNMJyi3V0a0wZRqcGIl3ddS6+jZbHO07lauIBTjlpWNU4gyw8cw6ODP8x0jZ96k/Bq8/ZgwpVMQxhlXKx2LJaJd8K7FneX80icVJKkvbsE0Mie/E2GDSGah/dfXR/UzrpQDMIzSgbSwGJ2alC1mx/fBKsqbBpNowrN/uAPC9jsLTz6o81+tKyMypBfQ/Lt78pdAS5lH/72OVo67oEj5UxQg58jKoUT0c8xJUrcJPDz3TU0j3pTP8fCgnu/hv4Jx/aw0igv1QJFK3awENxEOyg/x7xlY6beS06Wbbu/lCHRoVl2pdmG/dgsq/H638eA7niSL1qNac2o/HYYVsLrGOOh++YnJuzgoy498JS1uea76QqjxePXDcdcAafQkTrs2X2RFl/tai2aiCrnB0PlhEnUAfQXlgDi8Qx6jGurK9As534U3tJ9RxdC8poISwwvYitRGhtyCKCisEMzCkQHOXOD3Lve7HJClid9plBHccy45jypsu8Z5jhZvSxNmkAlrNqvcN0xQuL3xhMY3f2keln+ong2Rb+HYEk9xEeuShGLpX7e1NkOJh9jl9XQo2MD4JTjk+kSxWYJvwKI0D7XdsNRTpV/dxI6XnRLvS2PWImMN5LX+16nnPb7Cn6Zcam0FktqYcRwiJllhQ4HQTjnDXt6L05Ud4vSxSKbmX9F0rV6x0r11Ng=",
+      "offset": 4294967296,
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "internxt.range.reject.0.-16",
+      "op": "internxt.range",
+      "expected": {
+        "status": "rejected"
+      },
+      "encrypted": "cGF5bG9hZA==",
+      "offset": -16,
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "known_difference": "Dart accepts negative aligned offsets",
+      "engine_expected": {
+        "dart": {
+          "status": "ok",
+          "value": {
+            "length": 7,
+            "sha256": "072df9f27d4d8f446672761c03b58faad728be48511c1a9628965f203ad1de98"
+          }
+        }
+      }
+    },
+    {
+      "id": "internxt.range.reject.0.1",
+      "op": "internxt.range",
+      "expected": {
+        "status": "rejected"
+      },
+      "encrypted": "cGF5bG9hZA==",
+      "offset": 1,
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "internxt.range.reject.0.17",
+      "op": "internxt.range",
+      "expected": {
+        "status": "rejected"
+      },
+      "encrypted": "cGF5bG9hZA==",
+      "offset": 17,
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
+      "id": "internxt.key.1",
+      "op": "internxt.key",
+      "expected": "b2d75dc0c66a681a2305db053bbc3e82828caef8b6f92fd7fed31a743091a9b0",
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "ffffffffffffffffffffffffffffffff000102030405060708090a0b0c0d0e0f"
+    },
+    {
+      "id": "internxt.ctr.1.0",
+      "op": "internxt.ctr",
+      "expected": {
+        "length": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "size": 0,
+      "export": true,
+      "encrypted": "",
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "ffffffffffffffffffffffffffffffff000102030405060708090a0b0c0d0e0f"
+    },
+    {
+      "id": "internxt.ctr.1.1",
+      "op": "internxt.ctr",
+      "expected": {
+        "length": 1,
+        "sha256": "8f11b05da785e43e713d03774c6bd3405d99cd3024af334ffd68db663aa37034"
+      },
+      "size": 1,
+      "export": true,
+      "encrypted": "DQ==",
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "ffffffffffffffffffffffffffffffff000102030405060708090a0b0c0d0e0f"
+    },
+    {
+      "id": "internxt.ctr.1.15",
+      "op": "internxt.ctr",
+      "expected": {
+        "length": 15,
+        "sha256": "416e54f66163781b724adba0ee5504988367a22c7534ca0f80790718bd0d090c"
+      },
+      "size": 15,
+      "export": true,
+      "encrypted": "DdWnIgAuJmLYf1Sf3V9w",
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "ffffffffffffffffffffffffffffffff000102030405060708090a0b0c0d0e0f"
+    },
+    {
+      "id": "internxt.ctr.1.16",
+      "op": "internxt.ctr",
+      "expected": {
+        "length": 16,
+        "sha256": "8bb7b0ec06cc5a9cffba45c26c1af5f5a05c4d49a647c3889f3e9a77c589a8d2"
+      },
+      "size": 16,
+      "export": true,
+      "encrypted": "DdWnIgAuJmLYf1Sf3V9wgg==",
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "ffffffffffffffffffffffffffffffff000102030405060708090a0b0c0d0e0f"
+    },
+    {
+      "id": "internxt.ctr.1.17",
+      "op": "internxt.ctr",
+      "expected": {
+        "length": 17,
+        "sha256": "0d74f71744cebfec039589a9fc8bde43f4cd179d793f6e70d8d73c067456835e"
+      },
+      "size": 17,
+      "export": true,
+      "encrypted": "DdWnIgAuJmLYf1Sf3V9wgo8=",
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "ffffffffffffffffffffffffffffffff000102030405060708090a0b0c0d0e0f"
+    },
+    {
+      "id": "internxt.ctr.1.65535",
+      "op": "internxt.ctr",
+      "expected": {
+        "length": 65535,
+        "sha256": "d01af5f3ac02ef7e55c53226b250b4741ce0758c9e1a03b686e83d3772e8711f"
+      },
+      "size": 65535,
+      "export": true,
+      "encrypted_file": "generated/internxt.ctr.1.65535.bin",
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "ffffffffffffffffffffffffffffffff000102030405060708090a0b0c0d0e0f"
+    },
+    {
+      "id": "internxt.ctr.1.65536",
+      "op": "internxt.ctr",
+      "expected": {
+        "length": 65536,
+        "sha256": "19b5fa6ac4854462f2ab19bb281f22589e88aa559c6efe7cf74e6b7d674ef07e"
+      },
+      "size": 65536,
+      "export": true,
+      "encrypted_file": "generated/internxt.ctr.1.65536.bin",
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "ffffffffffffffffffffffffffffffff000102030405060708090a0b0c0d0e0f"
+    },
+    {
+      "id": "internxt.ctr.1.65537",
+      "op": "internxt.ctr",
+      "expected": {
+        "length": 65537,
+        "sha256": "824a117f2165da15ed70f7dfd516f348083e9092b59d9bb7e34f28e99a6778e6"
+      },
+      "size": 65537,
+      "export": true,
+      "encrypted_file": "generated/internxt.ctr.1.65537.bin",
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "ffffffffffffffffffffffffffffffff000102030405060708090a0b0c0d0e0f"
+    },
+    {
+      "id": "internxt.ctr.1.1048593",
+      "op": "internxt.ctr",
+      "expected": {
+        "length": 1048593,
+        "sha256": "e235f163785013b3588ab0f97f24b57603a21013fbfbd70bdda1fe32a4c84987"
+      },
+      "size": 1048593,
+      "export": true,
+      "encrypted_file": "generated/internxt.ctr.1.1048593.bin",
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "ffffffffffffffffffffffffffffffff000102030405060708090a0b0c0d0e0f"
+    },
+    {
+      "id": "internxt.range.1.0",
+      "op": "internxt.range",
+      "expected": {
+        "length": 1031,
+        "sha256": "89062d81fd2dc0a80b7073d1cae17898301abcdcdae0d2fb1765c559d35dc4e5"
+      },
+      "encrypted": "DdWnIgAuJmLYf1Sf3V9wgo/ZHCmS6k9HrQFkThxR4P2PWIEDNTw0Xo2M79Ht7U8xg+oP1uZP6IPfcgQxjKKoaNdQX1+nDDULDpHw1e+687I9vFuiEkHlY9ev1xekhIY63KzrPDR/x4mGjYiV+1VwXRFQshtiK2afBr4bfnaR43dpOiSIPuMdNJWVn/S624nlZeC+5gFJvfJU9qdgG90IEeX/XNzYkGes3RTh3tHZwV5SbzXGCkIzsEwLlQW1m3Q1YnCvoI2WXYPHVgoMFpqruCbw0KqK7+eblZjc2qXwkK+ADGgXW08f91D5p66VfHeMio9YekLpz0LrukiQ1ILOVtPOdx7XXQgNuIqDzZy7j/6b8ThmUZ7WgpS9qK2hcqFg/KNNXKkIzcLDjxo9ld5/Uk3b2ePdqQbZwwFD31nIbm0ZVfyHOgICTrOGv8mDZkGCokhb+mOx7OlyqEydQUGTsVvVvP43W+NjaFKO8u5sAWCTa9qwR+7ot3Dvv+y3yQDN21+1VdA2ZQGx7SmywkeM2rWT/ZHdyuMr/meIVJY2Z2uvq4V8f0T0KZit38FfRJuIwJ27Zjiq03J4RrcTYs77xaSjbJacJXQihI1GVNbCo6jOFxzolenhGujUbnM1DG/6zQzQj4hJZ2AV5tSlNRKnmppkvLBhsPii/cnX/2JIHdunduxfRy+znslF568JkowpiSb3WogueDTr7sj/BmbPH3b9mgBwHINoc/PyIAzkcqachUwnp6VFswsKF4TZuRdqHeT69+VhohmoI0NlZPGp4GCp/E8EuXRM8UFQefzBf6HoxtESP6aQxquPQwTpk7iqlsbVpimVxBihfJyjyTh5LDqK3CrYV0E5Mey28USsmTegGf8/I0wopSHa++Hq/xV9QZwdFe56ixmbahHRqm20+8eLXXFeBpT12iAQPlsES9uE0cnpvpGvz/sHermJylDAvXB0RWaCuE8IkCnxdvG0fXTdpGNRm9bNLeNekD8/WKicaCFuRzzlHeFA1vDNJuHqcu3L8uYkJ50NAtGiEFE78i7M1jcNZ2QZ2XQCPRMBlU7hnqI5rK73a7TXUtU0taXWZw61Xdqj6osrPbjECYsIM5wwwtj4zBS1OPmaSC6/F7aBzG7EEkbvdU8pXTdE/IeZ38yn4P+1QPOFYvYzjGH8oGzJ8+s+jGQ73icjLCjsB79wED9u0laJI3W9b1Aa4Vwk+KdmVQCj1QQNEa9n2UJ0mv3zsqiTj8uZS77b81cDeodjZ05SHtxbMlxdqpDPJz16clSt1IDATr2fDpyK/H1mSh5g7nwvt4QNTRMW+A0sfjwzO4y7njp2XzX+ZspWSu0ZLHiqiVMhBizz0+5Mc2ZN7Ab9PhFtNAM=",
+      "offset": 0,
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "ffffffffffffffffffffffffffffffff000102030405060708090a0b0c0d0e0f"
+    },
+    {
+      "id": "internxt.range.1.16",
+      "op": "internxt.range",
+      "expected": {
+        "length": 1031,
+        "sha256": "89062d81fd2dc0a80b7073d1cae17898301abcdcdae0d2fb1765c559d35dc4e5"
+      },
+      "encrypted": "tMxrPLkHoGqGdHN7B6v11uI3rCjAKwFF8JPSNwfAZESU3xQr+XLz9shH6ia5udV36kuqSJJnWCQjd+/o9M/kh9ZRdI95VNJ2KbjifMmrq9HJm/5HKUAhb6mg44DMQItALk3JDlXFc6gTxQZBa2r2QHxRCafY/iIp7oCo4VH2pogO1akYFH6omXnZSosuyn0K2OC68ff9DJnK4frjzqTaa7iBANF/WQ6vsRCgEsCwWd95TbDdlqNKdux7ZWE9j1GjE+elgacACrCA78nhuAq7gu9hQwKsWiTqL+ScRH9XYvuftEWFX9LaNf6RooXvn7FL6NuAC/wwZyCTcJ72icya1XYeFU0kieOZbqiDwM5fipXrllYhtjUrKO6kbyqgxYJNcMCs9OhHEezYfFziQj15WHI406rcHT9VxpGKIm5JbOm3f04EdISHhF2Fp4h2VOisZDNa0Row9lR9qZPN8xcUV31+7aU889eqi/qI+dzkLyvGYKguxQFw6pzCRNn3UHLPgoaWvPInCB7pEpNpidBKRMLAsGuKX8k25bbqK7FxjP3boKSbI5/EB1NrXQhf0YbekbSZvbFKGQmRd11hwbeIhSH6N/3i/NoHEv9DHFgneg3YN83wlXKNij7zo7AOD1iHoXHLpUpa7ZngtsrEd78I8MoZwXS9MoiLvlDMQua/p1yeE+ygnQUVW8bFPegzfbIASxtwLVtplF1oDu0dF5Flk3KSeTzaunio/h0i77SWOowC2eGC8lRJ9IcOKHBT5Ff3VcKRYClSYXvkOk1GGidQjIPT5gfEu6/b0Jp06vykrdGL+chdPKLRc4xTer72JQI5DZ83B/c6KgwmEqPGUce0GE3yyihWVxW6x/fUjIHKAohaoQJo9U9h9659ZMqXckng8pwoWnPsj8jFXQsLTPFg9uu84vxEiprYjixXVmThRbeoS2m/Ta/XIiOF3uRN7MtgTzdOSETsw/YwHEOrKkhNg3Z9GnM4Id4IFlX9naILyhBv1t6F8w/KciAppLUlSsHnBaG5GiaScyzCCR0A9eu4ZZSJlyJRscpwwcBnOyOAvqt4M66ozZaB5gQQXts0kH0kqdsv99WnAYItB419RdI4m2rZWdFpW9CTqQZwXFHLkmLC87qb6oKu5rJ3jS6zfAe1W9yYxhFqeQTDXDYbPQcqkB17CnksQ742HpBAvfHUS1HjmnmzLYy4bzgGWnzkXQmByBlcnYT60KRUQ8DGQHZRqol8c01jx24lqXaH/6IMKIBpYbqhq+2hULQb65/HYJxhMw+DVzpAkTZQbAvD58ZVKUQut6ZhJ01KQutNIENx8GYxQ79+RgprQ974FFFIczr5LRDRPEZBFNXoXVcRrhJ+elN0L10e7Fs=",
+      "offset": 16,
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "ffffffffffffffffffffffffffffffff000102030405060708090a0b0c0d0e0f"
+    },
+    {
+      "id": "internxt.range.1.65536",
+      "op": "internxt.range",
+      "expected": {
+        "length": 1031,
+        "sha256": "89062d81fd2dc0a80b7073d1cae17898301abcdcdae0d2fb1765c559d35dc4e5"
+      },
+      "encrypted": "6GrFhDoxOvG2OFjsPVilLj4O6Mt1SGLB5fVYuZ4eEYRdcU1TR84eDw20t0D7ErrfA8S11mvPMqPbt2RKl9jJEXPmjUuds0c9jbpLeAIr0H3R+xFrVWnDAYSKoBYzndWiQA84iVsDSmM/bPjoX9PfimNNxS+E8GOofDdHr8+YZowS4QeYxRDB4lh9fC0qb+2UwYnDvREXExuklzaBr064jXPiS57Va8FyFgt5bQ/+eceiT8RgR7SinojlweIE2lq5FuSnmxgbix9+KPXN0U+CRhslfEe4ny8JqTIHpAvif69dRfQNsR6V9Jqt73ywk+hh6ciUpFJ5ARpM0JaYF38/oA9O+Uaa8irvfiGRRXx26ENtE2x3dXQLzJP3IlOw+rSdpIzJDWi2q+MWJndyY3M1TpHXZQXsQj6i6RSeue0UcaqqwYOFb+h7+6Fmo7ietpGKmd1VReByg9gIbsCOYw3E1FJtZnPiiqPlLsJMdaW7YkEje5A7OS/sog9xjrCX1hEltL0wEV0LIou1J4vm9MbGy/jFZ1H0DPd11JWCFPl5JZcIzNfSscdIQqC6tVzABb89A+1mN45OWJYkikI8K0r7rHJ7xbHsYTY9v4IxzPoE04l1Fl6X+aWUh/pDsijqNmrXyFe7ZQmNpQ5NR+1swicFTvN3Pt4yZQE6/2p28RcPIZhRpmyeQ7M4+QPoxH6S9Vzhsk9cpEz83A6VpbZOCISXS9b/T8hP34m5gkg+EC7Am1I1+FWtP0Uo+3Bw465x3ET3YmKcpICFznDRsmi0G0glFK3aSoYGDlh0a5X6QD6Z9PX4Bmyr+phLdnfI2bHZ8WcMEMO2QaX4zZ7KdGQTyGRf8ffXS1LeoLmluSZ+N/dcApJRmB2l+kdcwpmV2kITnHtG8+cFLgC2WxKAUTY2gI7YFJKEFa9jRuapcF/68PO/6gkzglEpfoYR4/582qC+KxDO67J5X+KpX8N+EXGdj2Te9eHcr5KiJ60sKMT9b1Ai5bv+eTPDnkKgR6/Ctt5yXScUg7+T2ICZ4TP4L0bm/q1Ygv4vaBRvzJGKCLFSglxmpUICf4/kDD7mOzG/5A4oJoJfZlG5EwuLvu4tqTSbr50sJjUeHPYk+EY7aFqNYXYZrnCtndz3Mq2q4Zi4HT5ZNBb+uTx0YP9a7PG7vFxMC5oyX1hZBuwNnoAScsjdbpP4J+rZ5yaHJpeVjgGQnLUvxgincW5/y/qLrtH4nBiWIGCPssDs8os4/BUO4Kbb93s9tQRm3//N2qtNkPZHYF04U525FHL9KE7GrGmkw6OGkTHlEVcnejHdEc44et/sqswmdOwl45aHhIaSFpZU0t/sSvRYR02Qnk1cHOvS985RjwkwjfVakpUsfQs=",
+      "offset": 65536,
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "ffffffffffffffffffffffffffffffff000102030405060708090a0b0c0d0e0f"
+    },
+    {
+      "id": "internxt.range.1.4294967296",
+      "op": "internxt.range",
+      "expected": {
+        "length": 1031,
+        "sha256": "89062d81fd2dc0a80b7073d1cae17898301abcdcdae0d2fb1765c559d35dc4e5"
+      },
+      "encrypted": "L+A2pldkb842GKQ26RwG6NoDanIMvVewnza++mEzQkLOL7UqExbel1C98fcYFXLM+IvLtzfPnNH5pQjjMx8X8hbi0jI5bBYEz2LfPQFwf9maO0uBmMNEXpzIvKuutZS/O+NZuvsbL3h33nXPq0IvwfrOapDrKfpjYeL9YPKqodANAGFcw3xj4RdeH9BXQBi6qyiTzbsxC09FutU71C6nicM2C29KP23UiWWfIqYS/U0w1gLLOIEW0PI0E5Nx9IMjqgrj9L0lCBijKu8+UIoiCJRGXIyOLHXlYvA9hGqMBu/Hhkk7K893bQZF62U/nTtdVC+hSYG03szapgo6sNpIOUJnTLXoBl1Dsb81uWvNcJPIlGI/zO7ZKfnvY54p/hqqh1T5MXmmo4x9Wyv+jqbMwB82+h7iRY/1mkcz8ReQ8Jn6w7ZU3oxR2RjpSfbGEWqW/XOXi5RZXQNzypV5i33cqf4Shw0rSUKFZNChpzq5z54qPWVGxgbgqEM2xx4O4/26yTbfbTDmmqE8WGhCYGlzn5I8Pst1fo+eQXerlifxr6rZw5cyzkUa4aY7mCBLumQmQIFuBpRwPz2pq5kBPEoIp5Ehd44FmgF1Sm/bNp+W44HDcWDtCnjVccHmQkVLUQwyc1bNs4GUqWmn0ahkAM6dB7r7D6b1ggjwerPijG7V7Dq32gkrC88H3IFGIKFYwnmZkmISDbsEZH51biOcbNF6F3O6BB2CEy9e70tUd3iPIXsAe0nH7FqPfFjjOzlX1a55JAapiQHdZ4zPkbmRoSzTtaE0n6/vt1dsh56cRxITZYFfTWburp/oiTIcgHev7byWH5eC7Q2RkJdjEJHYye62Q0VqvLTt+NpK1GZ3bhRJrLm5P6g05aXrNNpeLxa7rCT7ft3uVs/eHRTtjOXA6xnVAKlv3cPgUmnCBCxNqNVw228QILs7wbFlFfodZKNdeHGsO+yqIHRINH04UO/vSeM4E6onm13P/lSqM+nnp1DytAPI+1FgV4DJCGQcm4BmHVvGSjdC5OjHAmCMXfASfxmYCmJAT5scpmAhsKmye1EDy72Rp3zB+FC/T90cwndmMtao0rUjE2tyZMUcyVa7N7igzNK3HSFhIk6/EzKhlIDbwKfcD0x32wbJUTKuPzT6ZxLeGtZnVL/HvcqWLMxQm1VlHf+Hmp5rlS0+0obBsCiWY/TKe2yYZaaPkt2/tnRU1wOVQT2wpyNlOYchV/sLzvdJNlsY7oKbFoNsaKzokDuc/1uLzOAAvEK2p5lxGnZY77odb4o1/JzYwoQebakLHXNMgPVaXvJCDgT4fi7HfVnfYPTFbXUlZaDnyvKu9H3yqdngbr95uIKgoEVcUiN7XbOpkgcpFz/gCl0=",
+      "offset": 4294967296,
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "ffffffffffffffffffffffffffffffff000102030405060708090a0b0c0d0e0f"
+    },
+    {
+      "id": "internxt.range.reject.1.-16",
+      "op": "internxt.range",
+      "expected": {
+        "status": "rejected"
+      },
+      "encrypted": "cGF5bG9hZA==",
+      "offset": -16,
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "ffffffffffffffffffffffffffffffff000102030405060708090a0b0c0d0e0f",
+      "known_difference": "Dart accepts negative aligned offsets",
+      "engine_expected": {
+        "dart": {
+          "status": "ok",
+          "value": {
+            "length": 7,
+            "sha256": "ac4be07fd0a16505407115456eda42e8a8cca4a0ca929e127b9807ca5ffbd91b"
+          }
+        }
+      }
+    },
+    {
+      "id": "internxt.range.reject.1.1",
+      "op": "internxt.range",
+      "expected": {
+        "status": "rejected"
+      },
+      "encrypted": "cGF5bG9hZA==",
+      "offset": 1,
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "ffffffffffffffffffffffffffffffff000102030405060708090a0b0c0d0e0f"
+    },
+    {
+      "id": "internxt.range.reject.1.17",
+      "op": "internxt.range",
+      "expected": {
+        "status": "rejected"
+      },
+      "encrypted": "cGF5bG9hZA==",
+      "offset": 17,
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "ffffffffffffffffffffffffffffffff000102030405060708090a0b0c0d0e0f"
+    }
+  ]
+}

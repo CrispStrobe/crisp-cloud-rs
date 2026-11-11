@@ -54,8 +54,8 @@ def main():
     try:
         (ROOT / 'rust/Cargo.toml').write_text(configure(args))
         fixtures = build()
-        fixtures['cases'] += mock_cases()
         (ROOT / 'vectors.json').write_text(json.dumps(fixtures, ensure_ascii=False, indent=2) + '\n')
+        fixtures['cases'] += mock_cases()
         if args.prebuilt:
             rust = Path(args.prebuilt).resolve() / 'rust-probe'
             dart = Path(args.prebuilt).resolve() / 'dart-probe'
@@ -92,6 +92,8 @@ def main():
         report = compare(fixtures['cases'], outputs, strict=args.strict)
         report['failures'] += wire_failures
         report['mock_cases'] = len(mock_cases())
+        report['probe_mode'] = 'prebuilt: use source/lockfiles from the originating artifact' if args.prebuilt else 'compiled from source'
+        report['workflow_commit'] = os.environ.get('GITHUB_SHA')
         report['native_backend'] = outputs['dart-native'].get('actual_backend')
         if sys.platform.startswith('linux') and report['native_backend'] != 'openssl':
             report['failures'].append('Linux native AES-GCM tests fell back instead of loading OpenSSL')

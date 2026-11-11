@@ -76,7 +76,12 @@ def build():
         salt='0102030405060708'
         case(f'internxt.password.{i}','internxt.password',hashlib.pbkdf2_hmac('sha1',password.encode(),bytes.fromhex(salt),10000,32).hex(),password=password,salt=salt)
     for salt in ['x', '123']:
-        case('internxt.password.reject.'+salt,'internxt.password',{'status':'rejected'},password='password',salt=salt)
+        extra = {}
+        if salt == '123':
+            expected_hash=hashlib.pbkdf2_hmac('sha1',b'password',bytes.fromhex('0123'),10000,32).hex()
+            extra={'known_difference':'Dart pads odd-length hex salts with a leading zero; Rust rejects them',
+                   'engine_expected':{'dart':{'status':'ok','value':expected_hash}}}
+        case('internxt.password.reject.'+salt,'internxt.password',{'status':'rejected'},password='password',salt=salt,**extra)
     for i,text in enumerate(texts):
         encrypted=cbc(text,'test-only-app-secret')
         case(f'internxt.text.decrypt.{i}','internxt.text.decrypt',text,encrypted=encrypted,key='test-only-app-secret')

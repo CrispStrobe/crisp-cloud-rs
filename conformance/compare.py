@@ -58,8 +58,11 @@ def write_report(report, directory):
     lines = ['# Dart / Rust provider conformance', '',
              f"Cases: {report['cases']}. Unexpected failures: {len(report['failures'])}. "
              f"Reviewed compatibility gaps: {len(report['known_gaps'])}.", '',
+             f"Cross-decryptions: {report.get('cross_decryptions', 0)}. "
+             f"HTTP scenarios: {report.get('mock_cases', 0)}. Native backend: {report.get('native_backend', 'not run')}.", '',
              'Default-promotion gate: ' + ('PASS' if report['promotion_ready'] else 'BLOCKED'), '',
-             'A green regression run preserves reviewed differences; it does not certify engine interchangeability.', '']
+             'A green regression run preserves reviewed differences; it does not certify engine interchangeability.', '',
+             'Rejection is compared at the API boundary; language-specific exception classes/messages are not asserted equal.', '']
     if report['known_gaps']:
         lines += ['| Case | Difference |', '| --- | --- |']
         lines += [f"| `{gap['id']}` | {gap['reason']} |" for gap in report['known_gaps']]

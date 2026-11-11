@@ -76,6 +76,9 @@ def cases():
                            'scenario': 'mutate', 'action': action, 'http_status': status,
                            'expected': 'created-folder' if action == 'create' and status == 200 else
                                        (True if status == 200 else {'status': 'rejected'})})
+    retry=next(c for c in result if c['id']=='internxt.mock.list.retry-503')
+    retry.update(known_difference='Dart retries Internxt listing GETs on 503; Rust currently fails immediately',
+                 engine_expected={'rust':{'status':'rejected'}})
     return result
 
 
@@ -142,18 +145,27 @@ class MockProvider(AbstractContextManager):
 
     def respond(self, case, request, attempt):
         scenario = case['scenario']
+        provider = case['op'].split('.')[0]
+        path = request['path']
+        # Check request contracts even for denial and transient-error responses.
+        if provider == 'filen':
+            if request['method'] != 'POST' or path != '/v3/dir/content' or request['body'] != {'uuid': 'root'}:
+                self.errors.append(case['id'] + ': unexpected Filen listing request')
+                return 400, {'status': False}
+        elif case['op'] == 'internxt.mock.list':
+            if request['method'] != 'GET' or path not in ['/folders/content/root/folders', '/folders/content/root/files']:
+                self.errors.append(case['id'] + ': unexpected Internxt listing request')
+                return 400, {}
+            query=request['query']
+            if set(query) != {'offset','limit','sort','direction'} or query.get('limit') != '50' or query.get('sort') != 'plainName' or query.get('direction') != 'ASC':
+                self.errors.append(case['id'] + ': incorrect pagination/sort parameters ' + str(query))
         if scenario == 'http-error':
             return case['http_status'], {'message': 'synthetic denial'}
         if scenario == 'invalid-json':
             return 200, b'{broken-json'
         if scenario == 'retry-503' and attempt == 1:
             return 503, {'message': 'synthetic temporary outage'}
-        provider = case['op'].split('.')[0]
-        path = request['path']
         if provider == 'filen':
-            if request['method'] != 'POST' or path != '/v3/dir/content' or request['body'] != {'uuid': 'root'}:
-                self.errors.append(case['id'] + ': unexpected Filen listing request')
-                return 400, {'status': False}
             folders, files, _ = listing('filen', case.get('count', 0))
             if scenario == 'corrupt-metadata':
                 folders = [{'uuid': 'broken', 'name': '002truncated', 'parent': 'root'}]
@@ -162,7 +174,7 @@ class MockProvider(AbstractContextManager):
             return 200, {'status': scenario != 'api-error', 'message': 'synthetic', 'data': {'folders': folders, 'uploads': files}}
         if case['op'] == 'internxt.mock.mutate':
             # Dart invalidates caches by fetching the item's parent metadata.
-            if request['method'] == 'GET' and path == '/files/file':
+            if request['method'] == 'GET' and path == '/files/file/meta':
                 return 200, {'uuid': 'file', 'folderUuid': 'root', 'parentUuid': 'root'}
             methods = {'create': ('POST', '/folders', {'plainName': '新規 Grüße', 'parentFolderUuid': 'root'}),
                        'rename': ('PUT', '/files/file/meta', {'plainName': '新規 Grüße', 'type': 'txt'}),
@@ -175,12 +187,7 @@ class MockProvider(AbstractContextManager):
             return case['http_status'], {'uuid': 'created-folder'}
         folders, files, _ = listing('internxt', case.get('count', 0))
         kind = path.rsplit('/', 1)[-1]
-        if request['method'] != 'GET' or path not in ['/folders/content/root/folders', '/folders/content/root/files']:
-            self.errors.append(case['id'] + ': unexpected Internxt listing request')
-            return 400, {}
         query = request['query']
-        if set(query) != {'offset', 'limit', 'sort', 'direction'} or query.get('limit') != '50' or query.get('sort') != 'plainName' or query.get('direction') != 'ASC':
-            self.errors.append(case['id'] + ': incorrect pagination/sort parameters ' + str(query))
         if scenario == 'missing-result':
             return 200, {'unexpected': True}
         if scenario == 'wrong-result-type':
@@ -200,9 +207,15 @@ class MockProvider(AbstractContextManager):
                     mutations = [r for r in requests if r['method'] != 'GET']
                     if len(mutations) != 1:
                         errors.append(f'{identifier} [{engine}]: mutation replayed or omitted')
+                    expected_reads=0 if engine=='rust' or case['action']=='create' else 1
+                    reads=[r for r in requests if r['method']=='GET']
+                    if len(reads)!=expected_reads or any(r['path']!='/files/file/meta' for r in reads):
+                        errors.append(f'{identifier} [{engine}]: wrong parent-cache metadata reads')
                     continue
                 scenario = case['scenario']
                 early_error = scenario in ['http-error', 'invalid-json', 'api-error', 'missing-data', 'wrong-result-type']
+                rust_no_retry = scenario=='retry-503' and engine=='rust' and case['op']=='internxt.mock.list'
+                early_error = early_error or rust_no_retry
                 if scenario == 'corrupt-metadata' and engine == 'rust':
                     early_error = True
                 expected = 1 if early_error else (1 if case['op'].startswith('filen') and engine == 'rust' else 2)
@@ -214,7 +227,7 @@ class MockProvider(AbstractContextManager):
                     wanted = Counter((kind, str(offset)) for kind in ['folders', 'files'] for offset in range(0, case.get('count', 0)+1, 50))
                     if offsets != wanted:
                         errors.append(f'{identifier} [{engine}]: missing/duplicate pagination offsets')
-                if scenario == 'retry-503':
+                if scenario == 'retry-503' and not rust_no_retry:
                     expected += 1
                 if len(requests) != expected:
                     errors.append(f'{identifier} [{engine}]: expected {expected} HTTP requests, got {len(requests)}')

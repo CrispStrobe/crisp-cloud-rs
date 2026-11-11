@@ -430,7 +430,14 @@
         "status": "rejected"
       },
       "password": "password",
-      "salt": "123"
+      "salt": "123",
+      "known_difference": "Dart pads odd-length hex salts with a leading zero; Rust rejects them",
+      "engine_expected": {
+        "dart": {
+          "status": "ok",
+          "value": "e3144e4857b9c2b9fc8fe6ec4377dd9cd015025533541e17f7ab456a111a669c"
+        }
+      }
     },
     {
       "id": "internxt.text.decrypt.0",

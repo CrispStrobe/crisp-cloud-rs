@@ -39,12 +39,22 @@ class MockOracleTest(unittest.TestCase):
         case = self.fixture('internxt.mock.trash.200')
         with MockProvider([case]) as server:
             base = server.for_engine({'cases': [case]}, 'dart')['cases'][0]['base_url']
+            self.request(base, '/files/file/meta').close()
             with self.assertRaises(HTTPError):
                 self.request(base, '/storage/trash/add', method='POST', body={'items': []})
             self.request(base, '/storage/trash/add', method='POST', body={'items': [{'uuid': 'file', 'type': 'file'}]}).close()
             errors = server.verify(['dart'])
             self.assertTrue(any('payload' in e for e in errors))
             self.assertTrue(any('replayed' in e for e in errors))
+
+    def test_parent_metadata_read_is_required_for_dart_mutation(self):
+        case = self.fixture('internxt.mock.move.403')
+        with MockProvider([case]) as server:
+            base = server.for_engine({'cases': [case]}, 'dart')['cases'][0]['base_url']
+            self.request(base, '/files/file/meta').close()
+            with self.assertRaises(HTTPError):
+                self.request(base, '/files/file', method='PATCH', body={'destinationFolder': 'destination'})
+            self.assertEqual(server.verify(['dart']), [])
 
     def test_forbidden_mutation_stays_forbidden(self):
         case = self.fixture('internxt.mock.move.403')

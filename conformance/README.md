@@ -62,7 +62,12 @@ result, with a protocol compatibility review for existing encrypted data.
 
 Known diagnostic cases include the Dart empty-CBC limitation, missing CBC
 envelope validation, legacy Latin-1 versus UTF-8 secret encoding, and negative
-CTR offsets. Do not change stored credential encoding merely to make parity
+CTR offsets. Dart also pads an odd-length hex password salt while Rust rejects
+it. Dart retries an Internxt listing GET after a 503 while Rust currently returns
+an error immediately. These exact differences are tested and block promotion;
+the harness does not change SDK retry policies to force agreement. Rejection is
+compared at the public API boundary, not by language-specific exception text.
+Do not change stored credential encoding merely to make parity
 green. The Rust malformed-Unicode metadata rejection has a package unit test.
 
 This suite does not yet certify full login/key exchange, live provider behavior,

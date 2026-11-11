@@ -20,6 +20,11 @@ the app combination (PointyCastle 4.0.0 / dart_pg 2.1.0). A fresh SDK dependency
 resolution with PointyCastle 3.x and dart_pg 2.1.0 fails compilation because of
 missing cipher classes; use `--dart-pg 2.0.0` when testing the older combination.
 Both software Filen AES-GCM backends are checked.
+The Linux run also requires the selected native backend to load OpenSSL; a
+silent software fallback fails. The Dart probe is compiled to a CLI executable
+before running. Reports include both compiled probes for repeatable fixture
+checks (`--prebuilt /path/to/extracted/results`), with the tested source versions
+and lockfiles supplied by the workflow commit/artifact.
 The harness accepts `--dart-filen`, `--dart-internxt`, `--rust-filen` and
 `--rust-internxt` source directories to qualify vendored app variants without
 changing their production dependencies. It restores the Rust probe manifest
@@ -34,6 +39,9 @@ Encryption exports are decrypted by every other engine/backend. Results are
 compared with the independent oracle, so identical mistakes in both engines
 still fail. Missing cases, unexpected exports, rejected positive cases and
 Rust panics fail.
+Valid AES-128/192 ciphertext and short/long encryption keys must be rejected by
+the AES-256 APIs. Incremental CTR output must match a single continuous stream
+across multiple blocks and a partial final block.
 
 Loopback HTTP fixtures exercise real listing and mutation APIs with independent
 encrypted metadata. They cover empty/Unicode directories, 49/50/51/100/101-item

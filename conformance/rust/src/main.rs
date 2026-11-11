@@ -30,7 +30,7 @@ fn run(case: &Value, root: &Path, exports: &mut Vec<Value>) -> Result<Value> {
             let session = filen::FilenSession {
                 gateway_url:base.to_owned(),ingest_url:base.to_owned(),egest_url:base.to_owned(),
                 email:"synthetic@example.invalid".into(),api_key:"synthetic-test-token".into(),
-                auth_version:filen::AuthVersion::V2,file_encryption_version:2,metadata_encryption_version:2,
+                auth_version:2,file_encryption_version:2,metadata_encryption_version:2,
                 root_folder_uuid:"root".into(),master_keys:vec![b"conformance-only-master-key".to_vec()],
                 dek:None,kek:None,private_key:None,hmac_key:None,
             };

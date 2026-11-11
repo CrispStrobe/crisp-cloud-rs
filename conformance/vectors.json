@@ -328,6 +328,72 @@
       "key": "787878787878787878787878787878787878787878787878787878787878787878"
     },
     {
+      "id": "filen.chunk.reject.valid-aes-128",
+      "op": "filen.chunk.decrypt",
+      "expected": {
+        "status": "rejected"
+      },
+      "encrypted": "YWFhYWFhYWFhYWFhFfIOgOqsJshNEIAhM4nv03daOP5O",
+      "key": "78787878787878787878787878787878"
+    },
+    {
+      "id": "filen.chunk.reject.valid-aes-192",
+      "op": "filen.chunk.decrypt",
+      "expected": {
+        "status": "rejected"
+      },
+      "encrypted": "YWFhYWFhYWFhYWFhINukRb/n28DmeWUinBkk9VuFQHwt",
+      "key": "787878787878787878787878787878787878787878787878"
+    },
+    {
+      "id": "filen.chunk.encrypt.reject.key-0",
+      "op": "filen.chunk.encrypt.reject",
+      "expected": {
+        "status": "rejected"
+      },
+      "key": ""
+    },
+    {
+      "id": "filen.chunk.encrypt.reject.key-1",
+      "op": "filen.chunk.encrypt.reject",
+      "expected": {
+        "status": "rejected"
+      },
+      "key": "78"
+    },
+    {
+      "id": "filen.chunk.encrypt.reject.key-16",
+      "op": "filen.chunk.encrypt.reject",
+      "expected": {
+        "status": "rejected"
+      },
+      "key": "78787878787878787878787878787878"
+    },
+    {
+      "id": "filen.chunk.encrypt.reject.key-24",
+      "op": "filen.chunk.encrypt.reject",
+      "expected": {
+        "status": "rejected"
+      },
+      "key": "787878787878787878787878787878787878787878787878"
+    },
+    {
+      "id": "filen.chunk.encrypt.reject.key-31",
+      "op": "filen.chunk.encrypt.reject",
+      "expected": {
+        "status": "rejected"
+      },
+      "key": "78787878787878787878787878787878787878787878787878787878787878"
+    },
+    {
+      "id": "filen.chunk.encrypt.reject.key-33",
+      "op": "filen.chunk.encrypt.reject",
+      "expected": {
+        "status": "rejected"
+      },
+      "key": "787878787878787878787878787878787878787878787878787878787878787878"
+    },
+    {
       "id": "internxt.password.0",
       "op": "internxt.password",
       "expected": "4f8d654f25ed46c53b94e7e63b718b971998767901a6ca97daff07eaff3755f5",
@@ -688,6 +754,25 @@
       "index": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
     },
     {
+      "id": "internxt.stream.0",
+      "op": "internxt.stream",
+      "expected": {
+        "length": 196641,
+        "sha256": "5cc57199da70a7d9158dcc61ab9b16c24fcd859a382f475cb85941e8eb3135fb"
+      },
+      "chunks": [
+        16,
+        65536,
+        32,
+        65520,
+        65537
+      ],
+      "encrypted_file": "generated/internxt.stream.0.bin",
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    {
       "id": "internxt.range.reject.0.-16",
       "op": "internxt.range",
       "expected": {
@@ -915,6 +1000,25 @@
       },
       "encrypted": "L+A2pldkb842GKQ26RwG6NoDanIMvVewnza++mEzQkLOL7UqExbel1C98fcYFXLM+IvLtzfPnNH5pQjjMx8X8hbi0jI5bBYEz2LfPQFwf9maO0uBmMNEXpzIvKuutZS/O+NZuvsbL3h33nXPq0IvwfrOapDrKfpjYeL9YPKqodANAGFcw3xj4RdeH9BXQBi6qyiTzbsxC09FutU71C6nicM2C29KP23UiWWfIqYS/U0w1gLLOIEW0PI0E5Nx9IMjqgrj9L0lCBijKu8+UIoiCJRGXIyOLHXlYvA9hGqMBu/Hhkk7K893bQZF62U/nTtdVC+hSYG03szapgo6sNpIOUJnTLXoBl1Dsb81uWvNcJPIlGI/zO7ZKfnvY54p/hqqh1T5MXmmo4x9Wyv+jqbMwB82+h7iRY/1mkcz8ReQ8Jn6w7ZU3oxR2RjpSfbGEWqW/XOXi5RZXQNzypV5i33cqf4Shw0rSUKFZNChpzq5z54qPWVGxgbgqEM2xx4O4/26yTbfbTDmmqE8WGhCYGlzn5I8Pst1fo+eQXerlifxr6rZw5cyzkUa4aY7mCBLumQmQIFuBpRwPz2pq5kBPEoIp5Ehd44FmgF1Sm/bNp+W44HDcWDtCnjVccHmQkVLUQwyc1bNs4GUqWmn0ahkAM6dB7r7D6b1ggjwerPijG7V7Dq32gkrC88H3IFGIKFYwnmZkmISDbsEZH51biOcbNF6F3O6BB2CEy9e70tUd3iPIXsAe0nH7FqPfFjjOzlX1a55JAapiQHdZ4zPkbmRoSzTtaE0n6/vt1dsh56cRxITZYFfTWburp/oiTIcgHev7byWH5eC7Q2RkJdjEJHYye62Q0VqvLTt+NpK1GZ3bhRJrLm5P6g05aXrNNpeLxa7rCT7ft3uVs/eHRTtjOXA6xnVAKlv3cPgUmnCBCxNqNVw228QILs7wbFlFfodZKNdeHGsO+yqIHRINH04UO/vSeM4E6onm13P/lSqM+nnp1DytAPI+1FgV4DJCGQcm4BmHVvGSjdC5OjHAmCMXfASfxmYCmJAT5scpmAhsKmye1EDy72Rp3zB+FC/T90cwndmMtao0rUjE2tyZMUcyVa7N7igzNK3HSFhIk6/EzKhlIDbwKfcD0x32wbJUTKuPzT6ZxLeGtZnVL/HvcqWLMxQm1VlHf+Hmp5rlS0+0obBsCiWY/TKe2yYZaaPkt2/tnRU1wOVQT2wpyNlOYchV/sLzvdJNlsY7oKbFoNsaKzokDuc/1uLzOAAvEK2p5lxGnZY77odb4o1/JzYwoQebakLHXNMgPVaXvJCDgT4fi7HfVnfYPTFbXUlZaDnyvKu9H3yqdngbr95uIKgoEVcUiN7XbOpkgcpFz/gCl0=",
       "offset": 4294967296,
+      "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+      "bucket": "0123456789abcdef01234567",
+      "index": "ffffffffffffffffffffffffffffffff000102030405060708090a0b0c0d0e0f"
+    },
+    {
+      "id": "internxt.stream.1",
+      "op": "internxt.stream",
+      "expected": {
+        "length": 196641,
+        "sha256": "5cc57199da70a7d9158dcc61ab9b16c24fcd859a382f475cb85941e8eb3135fb"
+      },
+      "chunks": [
+        16,
+        65536,
+        32,
+        65520,
+        65537
+      ],
+      "encrypted_file": "generated/internxt.stream.1.bin",
       "mnemonic": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
       "bucket": "0123456789abcdef01234567",
       "index": "ffffffffffffffffffffffffffffffff000102030405060708090a0b0c0d0e0f"

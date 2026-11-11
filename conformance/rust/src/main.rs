@@ -67,6 +67,10 @@ fn run(case: &Value, root: &Path, exports: &mut Vec<Value>) -> Result<Value> {
         }
         "filen.metadata.encrypt" => json!(filen::v2_encrypt_metadata(text(case,"text")?,text(case,"key")?.as_bytes(),*b"aaaaaaaaaaaa")?),
         "filen.metadata.decrypt" => json!(filen::v2_decrypt_metadata(text(case,"encrypted")?,text(case,"key")?.as_bytes())?),
+        "filen.chunk.encrypt.reject" => {
+            let key:[u8;32]=bytes(case,"key")?.try_into().map_err(|_|anyhow!("key length"))?;
+            json!(STANDARD.encode(filen::encrypt_file_chunk(b"hello",&key,*b"aaaaaaaaaaaa")?))
+        }
         "filen.chunk" | "filen.chunk.decrypt" => {
             let key: [u8;32] = bytes(case,"key")?.try_into().map_err(|_|anyhow!("key length"))?;
             let raw = encrypted(case,root)?;
@@ -88,7 +92,7 @@ fn run(case: &Value, root: &Path, exports: &mut Vec<Value>) -> Result<Value> {
             exports.push(json!({"id":id,"op":"internxt.text.decrypt","encrypted":sealed,"key":case["key"],"expected":case["expected"]}));
             json!(result)
         }
-        "internxt.key" | "internxt.ctr" | "internxt.range" | "internxt.ctr.decrypt" => {
+        "internxt.key" | "internxt.ctr" | "internxt.range" | "internxt.ctr.decrypt" | "internxt.stream" => {
             let bucket: [u8;12] = bytes(case,"bucket")?.try_into().map_err(|_|anyhow!("bucket length"))?;
             let index: [u8;32] = bytes(case,"index")?.try_into().map_err(|_|anyhow!("index length"))?;
             let mnemonic = text(case,"mnemonic")?;
@@ -96,7 +100,15 @@ fn run(case: &Value, root: &Path, exports: &mut Vec<Value>) -> Result<Value> {
             else {
                 let mut plain = encrypted(case,root)?;
                 let offset = case.get("offset").map(|x|x.as_u64().context("negative offset")).transpose()?.unwrap_or(0);
-                internxt::crypt_at(&mut plain,mnemonic,&bucket,&index,offset)?;
+                if op == "internxt.stream" {
+                    let mut cursor=0;
+                    for length in case["chunks"].as_array().context("chunks")? {
+                        let end=cursor+length.as_u64().context("length")? as usize;
+                        internxt::crypt_at(&mut plain[cursor..end],mnemonic,&bucket,&index,cursor as u64)?;
+                        cursor=end;
+                    }
+                    anyhow::ensure!(cursor==plain.len(),"incomplete streaming fixture");
+                } else {internxt::crypt_at(&mut plain,mnemonic,&bucket,&index,offset)?;}
                 if case["export"] == true {
                     let source = pattern(case["size"].as_u64().context("size")? as usize);
                     let mut fixed = source.clone(); internxt::crypt(&mut fixed,mnemonic,&bucket,&index);

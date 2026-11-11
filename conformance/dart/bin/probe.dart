@@ -95,6 +95,7 @@ Future<Object?> run(Map c,String root,FilenCrypto filen,List<Map<String,dynamic>
     case 'filen.login': return filen.deriveKeys(c['password'] as String,c['version'] as int,c['salt'] as String);
     case 'filen.metadata.encrypt': return filen.encryptMetadata002(c['text'] as String,c['key'] as String);
     case 'filen.metadata.decrypt': return filen.decryptMetadata002(c['encrypted'] as String,c['key'] as String);
+    case 'filen.chunk.encrypt.reject': return base64.encode(await filen.encryptData(Uint8List.fromList([1,2,3]),unhex(c['key'] as String)));
     case 'filen.chunk':
     case 'filen.chunk.decrypt':
       final key=unhex(c['key'] as String);
@@ -112,6 +113,17 @@ Future<Object?> run(Map c,String root,FilenCrypto filen,List<Map<String,dynamic>
       exports.add({'id':c['id'],'op':'internxt.text.decrypt','encrypted':sealed,'key':c['key'],'expected':c['expected']});
       return plain;
     case 'internxt.key': return hex(internxt.generateFileKey(c['mnemonic'] as String,c['bucket'] as String,unhex(c['index'] as String)));
+    case 'internxt.stream':
+      final raw=encrypted(c,root), output=BytesBuilder();
+      final cipher=internxt.downloadDecryptor(c['mnemonic'] as String,c['bucket'] as String,c['index'] as String);
+      var cursor=0;
+      for(final length in c['chunks'] as List) {
+        final end=cursor+(length as int);
+        output.add(cipher.process(Uint8List.sublistView(raw,cursor,end)));
+        cursor=end;
+      }
+      if(cursor!=raw.length) throw StateError('incomplete streaming fixture');
+      return summary(output.takeBytes());
     case 'internxt.ctr':
     case 'internxt.range':
     case 'internxt.ctr.decrypt':
@@ -129,14 +141,15 @@ Future<void> main(List<String> args) async {
   if(args.length!=2) throw ArgumentError('probe <fixtures.json> <output.json>');
   final input=jsonDecode(File(args[0]).readAsStringSync()) as Map;
   final backend=Platform.environment['FILEN_TEST_BACKEND']??'cryptography';
-  final crypto=FilenCrypto(random:FixedNonceRandom(),aesGcm:backend=='pointycastle'
-    ? PointycastleBackend((n)=>Uint8List.fromList(List.generate(n,(i)=>i))) : CryptographyBackend());
+  final aes=backend=='pointycastle' ? PointycastleBackend((n)=>Uint8List.fromList(List.generate(n,(i)=>i)))
+    : backend=='native' ? chooseAesGcmBackend() : CryptographyBackend();
+  final crypto=FilenCrypto(random:FixedNonceRandom(),aesGcm:aes);
   final results=<String,Object?>{}, exports=<Map<String,dynamic>>[];
   for(final raw in input['cases'] as List) {
     final c=raw as Map;
     try { results[c['id'] as String]={'status':'ok','value':await run(c,File(args[0]).parent.path,crypto,exports)}; }
     catch(error) { results[c['id'] as String]={'status':'rejected'}; }
   }
-  File(args[1]).writeAsStringSync(jsonEncode({'schema':1,'engine':'dart','backend':backend,'results':results,'exports':exports}));
+  File(args[1]).writeAsStringSync(jsonEncode({'schema':1,'engine':'dart','backend':backend,'actual_backend':aes.name,'results':results,'exports':exports}));
   stdout.writeln('Dart probe: ${results.length} cases, ${exports.length} exports ($backend)');
 }

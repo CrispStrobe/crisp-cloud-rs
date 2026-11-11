@@ -7,9 +7,9 @@ import json
 from pathlib import Path
 
 OPS = {'filen.login', 'filen.metadata.encrypt', 'filen.metadata.decrypt',
-       'filen.chunk', 'filen.chunk.decrypt', 'internxt.password',
+       'filen.chunk', 'filen.chunk.decrypt', 'filen.chunk.encrypt.reject', 'internxt.password',
        'internxt.text.decrypt', 'internxt.text.roundtrip', 'internxt.key',
-       'internxt.ctr', 'internxt.range', 'internxt.ctr.decrypt',
+       'internxt.ctr', 'internxt.range', 'internxt.ctr.decrypt', 'internxt.stream',
        'filen.mock.list', 'internxt.mock.list', 'internxt.mock.mutate'}
 
 

@@ -21,6 +21,10 @@ def configure(args):
     for package, path in [('filen_client', args.dart_filen), ('internxt_client', args.dart_internxt)]:
         if path:
             overrides[package] = {'path': str(Path(path).resolve())}
+    if args.published_internxt:
+        if args.dart_internxt:
+            raise ValueError('Choose a Dart Internxt source directory or a published version')
+        overrides['internxt_client'] = args.published_internxt
     if args.pointycastle:
         overrides['pointycastle'] = args.pointycastle
     if args.dart_pg:
@@ -39,8 +43,9 @@ def configure(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for arg in ['dart-filen', 'dart-internxt', 'rust-filen', 'rust-internxt', 'pointycastle', 'dart-pg']:
+    for arg in ['dart-filen', 'dart-internxt', 'rust-filen', 'rust-internxt', 'pointycastle', 'dart-pg', 'published-internxt', 'prebuilt']:
         parser.add_argument('--' + arg)
+    parser.set_defaults(pointycastle='4.0.0', dart_pg='2.1.0')
     parser.add_argument('--strict', action='store_true', help='fail on reviewed gaps too (default-promotion gate)')
     args = parser.parse_args()
     results = ROOT / 'results'
@@ -51,12 +56,20 @@ def main():
         fixtures = build()
         fixtures['cases'] += mock_cases()
         (ROOT / 'vectors.json').write_text(json.dumps(fixtures, ensure_ascii=False, indent=2) + '\n')
-        command(['dart', 'pub', 'get'], ROOT / 'dart')
-        command(['cargo', 'build', '--manifest-path', 'Cargo.toml'], ROOT / 'rust')
-        rust = ROOT / 'rust/target/debug/provider-conformance-probe'
+        if args.prebuilt:
+            rust = Path(args.prebuilt).resolve() / 'rust-probe'
+            dart = Path(args.prebuilt).resolve() / 'dart-probe'
+        else:
+            command(['dart', 'pub', 'get'], ROOT / 'dart')
+            dart = results / 'dart-probe'
+            command(['dart', 'compile', 'exe', 'bin/probe.dart', '-o', str(dart)], ROOT / 'dart')
+            command(['cargo', 'build', '--manifest-path', 'Cargo.toml'], ROOT / 'rust')
+            rust = ROOT / 'rust/target/debug/provider-conformance-probe'
+            import shutil
+            shutil.copy2(rust, results / 'rust-probe')
         engines = [('rust', [str(rust)], None)] + [
-            ('dart' + suffix, ['dart', 'run', 'bin/probe.dart'], dict(os.environ, FILEN_TEST_BACKEND=backend))
-            for suffix, backend in [('', 'cryptography'), ('-pointycastle', 'pointycastle')]]
+            ('dart' + suffix, [str(dart)], dict(os.environ, FILEN_TEST_BACKEND=backend))
+            for suffix, backend in [('', 'cryptography'), ('-pointycastle', 'pointycastle'), ('-native', 'native')]]
         outputs = {}
         with MockProvider(fixtures['cases']) as server:
             for name, argv, env in engines:
@@ -75,17 +88,25 @@ def main():
         for case in fixtures['cases']:
             if 'dart' in case.get('engine_expected', {}):
                 case['engine_expected']['dart-pointycastle'] = case['engine_expected']['dart']
+                case['engine_expected']['dart-native'] = case['engine_expected']['dart']
         report = compare(fixtures['cases'], outputs, strict=args.strict)
         report['failures'] += wire_failures
         report['mock_cases'] = len(mock_cases())
+        report['native_backend'] = outputs['dart-native'].get('actual_backend')
+        if sys.platform.startswith('linux') and report['native_backend'] != 'openssl':
+            report['failures'].append('Linux native AES-GCM tests fell back instead of loading OpenSSL')
         cross_count = 0
         for producer, output in outputs.items():
             exports = output['exports']
             # Do not allow an implementation to skip its encryption checks.
             required = {c['id'] for c in fixtures['cases'] if c.get('export') and
                         c.get('engine_expected', {}).get(producer, {}).get('status') != 'rejected'}
-            if {c['id'] for c in exports} != required:
+            if {c['id'] for c in exports} != required or len(exports) != len(required):
                 report['failures'].append(producer + ': incomplete encryption exports')
+            original = {c['id']: c for c in fixtures['cases']}
+            for case in exports:
+                if case.get('expected') != original.get(case['id'], {}).get('expected'):
+                    raise ValueError('Encryption export changed its oracle')
             path = results / (producer + '-exports.json')
             path.write_text(json.dumps({'cases': exports}))
             for consumer, argv, env in engines:

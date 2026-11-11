@@ -6,7 +6,7 @@ dependencies:
   filen_client:
     git:
       url: https://github.com/CrispStrobe/filen-dart
-      ref: 05bc4c6b0e8a01e577a30f1658e72d7737fa7635
+      ref: 1e2d6d6ec890ada798101c2ce4d5060ab33b9d33
   internxt_client:
     git:
       url: https://github.com/CrispStrobe/internxt-dart

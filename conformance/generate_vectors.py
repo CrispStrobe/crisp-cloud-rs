@@ -64,6 +64,14 @@ def build():
             ('missing-tag',tiny[:20],key),('tampered',tiny[:-1]+bytes([tiny[-1]^1]),key),
             ('wrong-key',tiny,b'x'*32),('key-16',tiny,b'x'*16),('key-31',tiny,b'x'*31),('key-33',tiny,b'x'*33)]:
         case('filen.chunk.reject.'+name,'filen.chunk.decrypt',{'status':'rejected'},encrypted=b64(encrypted),key=raw_key.hex())
+    # Valid AES-128/192 ciphertext must still be rejected by an AES-256-only
+    # API; a wrong-key fixture alone would not detect accidental AES-128 use.
+    for length in [16, 24]:
+        short_key=b'x'*length
+        sealed=nonce+AESGCM(short_key).encrypt(nonce,b'hello',None)
+        case(f'filen.chunk.reject.valid-aes-{length*8}','filen.chunk.decrypt',{'status':'rejected'},encrypted=b64(sealed),key=short_key.hex())
+    for length in [0, 1, 16, 24, 31, 33]:
+        case(f'filen.chunk.encrypt.reject.key-{length}','filen.chunk.encrypt.reject',{'status':'rejected'},key=(b'x'*length).hex())
     for i,password in enumerate(['password','pässwörd 中文','']):
         salt='0102030405060708'
         case(f'internxt.password.{i}','internxt.password',hashlib.pbkdf2_hmac('sha1',password.encode(),bytes.fromhex(salt),10000,32).hex(),password=password,salt=salt)
@@ -103,6 +111,10 @@ def build():
             data=pattern(1031); counter=(int.from_bytes(index[:16],'big')+offset//16)%(1<<128)
             encrypted=Cipher(algorithms.AES(file_key),modes.CTR(counter.to_bytes(16,'big'))).encryptor().update(data)
             case(f'internxt.range.{index_id}.{offset}','internxt.range',digest(data),encrypted=b64(encrypted),offset=offset,**common)
+        data=pattern(196641)
+        sealed=Cipher(algorithms.AES(file_key),modes.CTR(index[:16])).encryptor().update(data)
+        case(f'internxt.stream.{index_id}','internxt.stream',digest(data),chunks=[16,65536,32,65520,65537],
+             **payload(sealed,f'internxt.stream.{index_id}'),**common)
         for offset in [-16,1,17]:
             extra = {}
             if offset < 0:

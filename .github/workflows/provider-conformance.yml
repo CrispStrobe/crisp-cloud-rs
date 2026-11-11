@@ -11,9 +11,24 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pointycastle: ['^3.7.3', '^4.0.0']
+        include:
+          # SDK lockfile combination and the app lockfile combination.
+          - pointycastle: '3.9.1'
+            dart_pg: '2.0.0'
+          - pointycastle: '4.0.0'
+            dart_pg: '2.1.0'
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: CrispStrobe/filen-dart
+          ref: 05bc4c6b0e8a01e577a30f1658e72d7737fa7635
+          path: sdk/filen
+      - uses: actions/checkout@v4
+        with:
+          repository: CrispStrobe/internxt-dart
+          ref: d538742eac22e0c1aa49956c098e62d9851ce4d6
+          path: sdk/internxt
       - uses: dart-lang/setup-dart@v1
         with:
           sdk: '3.13.7'
@@ -30,10 +45,29 @@ jobs:
       - name: Test the compatibility gate
         run: python -m unittest discover -s conformance -p 'test_*.py' -v
       - name: Cross-language golden and interoperability tests
-        run: python conformance/run.py --pointycastle '${{ matrix.pointycastle }}'
+        run: python conformance/run.py --pointycastle '${{ matrix.pointycastle }}' --dart-pg '${{ matrix.dart_pg }}' --dart-filen sdk/filen --dart-internxt sdk/internxt
       - name: Existing hermetic Rust package tests
         if: ${{ !cancelled() }}
         run: cargo test --workspace --all-targets
+      - name: Existing hermetic Dart package tests
+        if: ${{ !cancelled() }}
+        env:
+          POINTYCASTLE_VERSION: ${{ matrix.pointycastle }}
+          DART_PG_VERSION: ${{ matrix.dart_pg }}
+          DART_TEST_SKIP_LIVE: '1'
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          for package in ['filen', 'internxt']:
+              Path('sdk', package, 'pubspec_overrides.yaml').write_text(json.dumps({'dependency_overrides': {'pointycastle': os.environ['POINTYCASTLE_VERSION'], 'dart_pg': os.environ['DART_PG_VERSION']}}))
+          PY
+          cd sdk/filen
+          dart pub get
+          dart test --exclude-tags=live
+          cd ../internxt
+          dart pub get
+          dart test --exclude-tags=live
       - uses: actions/upload-artifact@v4
         if: always()
         with:

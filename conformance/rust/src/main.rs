@@ -25,6 +25,40 @@ fn run(case: &Value, root: &Path, exports: &mut Vec<Value>) -> Result<Value> {
     let id = text(case, "id")?;
     let op = text(case, "op")?;
     let value = match op {
+        "filen.mock.list" => {
+            let base = text(case,"base_url")?;
+            let session = filen::FilenSession {
+                gateway_url:base.to_owned(),ingest_url:base.to_owned(),egest_url:base.to_owned(),
+                email:"synthetic@example.invalid".into(),api_key:"synthetic-test-token".into(),
+                auth_version:filen::AuthVersion::V2,file_encryption_version:2,metadata_encryption_version:2,
+                root_folder_uuid:"root".into(),master_keys:vec![b"conformance-only-master-key".to_vec()],
+                dek:None,kek:None,private_key:None,hmac_key:None,
+            };
+            let client = filen::FilenNativeClient::from_session(&session)?;
+            let mut items = Vec::new();
+            for _ in 0..case["repeat"].as_u64().unwrap_or(1) {items = client.list_folder_cached("root")?;}
+            let mut normalized:Vec<_> = items.iter().map(|i|json!({"uuid":i.uuid,"name":i.name,"is_dir":i.is_dir,"size":i.size})).collect();
+            normalized.sort_by(|a,b|a["uuid"].as_str().cmp(&b["uuid"].as_str()));
+            json!(normalized)
+        }
+        "internxt.mock.list" | "internxt.mock.mutate" => {
+            let client = internxt::InternxtNativeClient::new(text(case,"base_url")?,"synthetic-test-token")?;
+            if op == "internxt.mock.list" {
+                let mut items = Vec::new();
+                for _ in 0..case["repeat"].as_u64().unwrap_or(1) {items = client.list_folder_cached("root")?;}
+                let mut normalized:Vec<_> = items.iter().map(|i|json!({"uuid":i.uuid,"name":i.name,"is_dir":i.is_dir,"size":i.size})).collect();
+                normalized.sort_by(|a,b|a["uuid"].as_str().cmp(&b["uuid"].as_str()));
+                json!(normalized)
+            } else {
+                match text(case,"action")? {
+                    "create" => json!(client.create_folder("root","新規 Grüße")?),
+                    "rename" => {client.rename_file("file","新規 Grüße","txt")?;json!(true)},
+                    "move" => {client.move_file("file","destination")?;json!(true)},
+                    "trash" => {client.trash("file","file")?;json!(true)},
+                    _ => return Err(anyhow!("unknown mutation")),
+                }
+            }
+        }
         "filen.login" => {
             let (raw, password) = filen::pbkdf2_login(text(case,"password")?,text(case,"salt")?);
             let raw = hex::encode(raw);

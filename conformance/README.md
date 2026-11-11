@@ -15,8 +15,11 @@ python conformance/run.py --pointycastle '^4.0.0'
 python conformance/run.py --pointycastle '^4.0.0' --strict
 ```
 
-CI also runs PointyCastle 3.x, the SDK-declared version. Flutter consumers
-currently override it to 4.x. Both software Filen AES-GCM backends are checked.
+CI runs the SDK lockfile combination (PointyCastle 3.9.1 / dart_pg 2.0.0) and
+the app combination (PointyCastle 4.0.0 / dart_pg 2.1.0). A fresh SDK dependency
+resolution with PointyCastle 3.x and dart_pg 2.1.0 fails compilation because of
+missing cipher classes; use `--dart-pg 2.0.0` when testing the older combination.
+Both software Filen AES-GCM backends are checked.
 The harness accepts `--dart-filen`, `--dart-internxt`, `--rust-filen` and
 `--rust-internxt` source directories to qualify vendored app variants without
 changing their production dependencies. It restores the Rust probe manifest
@@ -31,6 +34,16 @@ Encryption exports are decrypted by every other engine/backend. Results are
 compared with the independent oracle, so identical mistakes in both engines
 still fail. Missing cases, unexpected exports, rejected positive cases and
 Rust panics fail.
+
+Loopback HTTP fixtures exercise real listing and mutation APIs with independent
+encrypted metadata. They cover empty/Unicode directories, 49/50/51/100/101-item
+pagination, cache reuse, 401/403/404, malformed JSON, missing or invalid response
+collections, unreadable metadata, one transient 503 and create/rename/move/trash
+success and denial. The server verifies bearer authentication, pagination
+offsets, sort parameters, methods and mutation bodies. Denied mutations must
+make exactly one mutation request. Dart's parent-cache metadata reads are
+verified separately from the mutation, rather than requiring identical internal
+request counts. No production HTTP endpoint is used by these tests.
 
 `results/report.md` and `results/report.json` distinguish unexpected failures
 from exact, reviewed compatibility differences. Reviewed differences are

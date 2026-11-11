@@ -6,6 +6,72 @@ import 'package:crypto/crypto.dart' as hashes;
 import 'package:filen_client/crypto.dart';
 import 'package:filen_client/aes_gcm_backend.dart';
 import 'package:internxt_client/crypto.dart' as internxt;
+import 'package:filen_client/api.dart' as filen_api;
+import 'package:filen_client/cache.dart' as filen_cache;
+import 'package:internxt_client/drive.dart' as drive;
+import 'package:internxt_client/cache.dart' as internxt_cache;
+import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
+
+// The only mocked component is transport routing. Production SDKs construct
+// and parse every request/response; a real loopback HTTP server verifies them.
+class LoopbackClient extends http.BaseClient {
+  final Uri base;
+  final http.Client inner = IOClient(HttpClient()..connectionTimeout=const Duration(seconds:5));
+  LoopbackClient(String value):base=Uri.parse(value) {
+    if(base.host!='127.0.0.1'||base.scheme!='http') throw ArgumentError('Loopback only');
+  }
+  @override Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final url=request.url.host=='gateway.filen.io'
+      ? base.replace(path:base.path+request.url.path,query:request.url.query) : request.url;
+    if(url.host!='127.0.0.1'||url.port!=base.port||!url.path.startsWith('${base.path}/')) throw StateError('Non-fixture HTTP request');
+    final copy=http.Request(request.method,url)
+      ..headers.addAll(request.headers)
+      ..followRedirects=false
+      ..bodyBytes=await request.finalize().toBytes();
+    return inner.send(copy).timeout(const Duration(seconds:10));
+  }
+  @override void close()=>inner.close();
+}
+
+Future<Object?> mock(Map c,FilenCrypto crypto) async {
+  final base=c['base_url'] as String, client=LoopbackClient(c['base_url'] as String);
+  try {
+    if(c['op']=='filen.mock.list') {
+      final cache=filen_cache.FilenCache(),api=filen_api.FilenApi(client:client)..apiKey='synthetic-test-token';
+      List<Map<String,dynamic>> items=[];
+      for(var i=0;i<((c['repeat'] as int?)??1);i++) {
+        items=[...await cache.listFoldersAsync('root',api:api,crypto:crypto,masterKeys:['conformance-only-master-key']),
+          ...await cache.listFolderFiles('root',api:api,crypto:crypto,masterKeys:['conformance-only-master-key'])];
+      }
+      final normalized=items.map((i)=><String,Object?>{'uuid':i['uuid'],'name':i['name'],'is_dir':i['type']=='folder','size':i['size']}).toList();
+      normalized.sort((a,b)=>(a['uuid'] as String).compareTo(b['uuid'] as String));
+      return normalized;
+    }
+    final folders=<String,internxt_cache.CacheEntry>{},files=<String,internxt_cache.CacheEntry>{};
+    return await http.runWithClient(() async {
+      if(c['op']=='internxt.mock.list') {
+        List<Map<String,dynamic>> items=[];
+        for(var i=0;i<((c['repeat'] as int?)??1);i++) {
+          items=[...await drive.listFolders(base,'synthetic-test-token',folders,'root',client:client),
+            ...await drive.listFolderFiles(base,'synthetic-test-token',files,'root',client:client)];
+        }
+        final normalized=items.map((i)=><String,Object?>{'uuid':i['uuid'],
+          'name':'${i['name']}${i['type']=='file'&&(i['fileType'] as String).isNotEmpty?'.${i['fileType']}':''}',
+          'is_dir':i['type']=='folder','size':i['size']}).toList();
+        normalized.sort((a,b)=>(a['uuid'] as String).compareTo(b['uuid'] as String));
+        return normalized;
+      }
+      switch(c['action']) {
+        case 'create': return (await drive.createFolder(base,'synthetic-test-token',folders,files,'新規 Grüße','root'))['uuid'];
+        case 'rename': await drive.renameFile(base,'synthetic-test-token',folders,files,'file','新規 Grüße','txt',client:client); return true;
+        case 'move': await drive.moveFile(base,'synthetic-test-token',folders,files,'file','destination',client:client); return true;
+        case 'trash': await drive.trashItems(base,'synthetic-test-token',folders,files,'file','file',client:client); return true;
+        default: throw UnsupportedError('mutation');
+      }
+    },()=>client);
+  } finally {client.close();}
+}
 
 class FixedNonceRandom implements Random {
   @override int nextInt(int max) => 26; // 'a' in the SDK's metadata alphabet.
@@ -24,6 +90,7 @@ Uint8List encrypted(Map c,String root)=>c['encrypted_file'] is String
 
 Future<Object?> run(Map c,String root,FilenCrypto filen,List<Map<String,dynamic>> exports) async {
   final op=c['op'] as String;
+  if(op.contains('.mock.')) return mock(c,filen);
   switch(op) {
     case 'filen.login': return filen.deriveKeys(c['password'] as String,c['version'] as int,c['salt'] as String);
     case 'filen.metadata.encrypt': return filen.encryptMetadata002(c['text'] as String,c['key'] as String);
@@ -62,7 +129,8 @@ Future<void> main(List<String> args) async {
   if(args.length!=2) throw ArgumentError('probe <fixtures.json> <output.json>');
   final input=jsonDecode(File(args[0]).readAsStringSync()) as Map;
   final backend=Platform.environment['FILEN_TEST_BACKEND']??'cryptography';
-  final crypto=FilenCrypto(random:FixedNonceRandom(),aesGcm:backend=='pointycastle'?PointycastleBackend():CryptographyBackend());
+  final crypto=FilenCrypto(random:FixedNonceRandom(),aesGcm:backend=='pointycastle'
+    ? PointycastleBackend((n)=>Uint8List.fromList(List.generate(n,(i)=>i))) : CryptographyBackend());
   final results=<String,Object?>{}, exports=<Map<String,dynamic>>[];
   for(final raw in input['cases'] as List) {
     final c=raw as Map;

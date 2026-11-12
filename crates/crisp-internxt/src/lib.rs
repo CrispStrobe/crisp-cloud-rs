@@ -3829,7 +3829,7 @@ fn wildcard_matches(value: &str, pattern: &str, case_sensitive: bool) -> bool {
 
 /// Status codes from Cloudflare / the Internxt gateway that mean "try again".
 fn is_transient_gateway_status(status: reqwest::StatusCode) -> bool {
-    matches!(status.as_u16(), 502 | 503 | 504)
+    matches!(status.as_u16(), 502..=504)
 }
 
 /// Send a request, retrying up to twice (0.5 s, 1.5 s) when the gateway

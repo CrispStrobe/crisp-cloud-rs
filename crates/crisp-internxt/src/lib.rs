@@ -452,6 +452,85 @@ pub struct InternxtNativeClient {
     listing_cache: Arc<Mutex<std::collections::HashMap<String, CachedListing>>>,
     verbose: bool,
     transfer_config: TransferConfig,
+    /// Times attached to file entries created inside [`Self::with_entry_times`].
+    entry_times: Arc<Mutex<Option<ItemTimes>>>,
+}
+
+/// Creation/modification times (ISO 8601) that Internxt accepts only when
+/// an item is created: `POST /folders` and the file entry `POST /files`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ItemTimes {
+    pub creation_time: Option<String>,
+    pub modification_time: Option<String>,
+}
+
+impl ItemTimes {
+    fn apply(&self, body: &mut serde_json::Value) {
+        if let Some(object) = body.as_object_mut() {
+            if let Some(value) = &self.creation_time {
+                object.insert("creationTime".into(), value.clone().into());
+            }
+            if let Some(value) = &self.modification_time {
+                object.insert("modificationTime".into(), value.clone().into());
+            }
+        }
+    }
+}
+
+/// Internxt cannot change timestamps of an existing item: drive-server-wip's
+/// `PUT /folders/{uuid}/meta` and `PUT /files/{uuid}/meta` only rename, and a
+/// file replace needs a new network file. Times can only be passed when the
+/// item is created or uploaded (see [`ItemTimes`]).
+#[derive(Debug)]
+pub struct TimestampUpdateUnsupported {
+    pub kind: &'static str,
+}
+
+impl std::fmt::Display for TimestampUpdateUnsupported {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Internxt cannot change timestamps of an existing {}; they can only be set when it is created or uploaded",
+            self.kind
+        )
+    }
+}
+
+impl std::error::Error for TimestampUpdateUnsupported {}
+
+/// Sent on every request. Cloudflare in front of the Internxt gateway
+/// rejects requests without a User-Agent (403 "Attention Required"),
+/// which reqwest omits by default.
+pub const USER_AGENT: &str = concat!("crisp-internxt/", env!("CARGO_PKG_VERSION"));
+
+/// drive-server-wip `FuzzySearchParamsDto` limits.
+pub const FUZZY_SEARCH_MIN_LENGTH: usize = 3;
+pub const FUZZY_SEARCH_MAX_LENGTH: usize = 255;
+
+/// Optional server-side search filters (combined with AND; `types` entries
+/// are OR-ed, `"folder"` includes folders, size limits exclude folders).
+#[derive(Clone, Debug, Default)]
+pub struct FuzzySearchFilters {
+    pub types: Vec<String>,
+    pub min_size: Option<u64>,
+    pub max_size: Option<u64>,
+    pub modified_after: Option<String>,
+    pub modified_before: Option<String>,
+}
+
+/// One `POST /fuzzy/{search}` result.
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq)]
+pub struct FuzzySearchHit {
+    pub id: String,
+    #[serde(rename = "itemId")]
+    pub item_id: String,
+    #[serde(rename = "itemType")]
+    pub item_type: String,
+    pub name: String,
+    #[serde(default)]
+    pub rank: Option<f64>,
+    #[serde(default)]
+    pub similarity: f64,
 }
 
 /// Durable state for a resumable upload.
@@ -671,6 +750,7 @@ impl InternxtNativeClient {
         reqwest::Url::parse(&base_url)
             .with_context(|| format!("invalid Internxt URL: {base_url}"))?;
         let http = Client::builder()
+            .user_agent(USER_AGENT)
             .connect_timeout(Duration::from_secs(30))
             .timeout(transfer_config.request_timeout)
             .build()
@@ -682,6 +762,7 @@ impl InternxtNativeClient {
             listing_cache: Arc::new(Mutex::new(std::collections::HashMap::new())),
             verbose: false,
             transfer_config,
+            entry_times: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -764,7 +845,10 @@ impl InternxtNativeClient {
         password: &str,
         tfa_code: Option<&str>,
     ) -> Result<InternxtSession> {
-        let http = Client::new();
+        let http = Client::builder()
+            .user_agent(USER_AGENT)
+            .build()
+            .context("building Internxt HTTP client")?;
         let drive_api_url = drive_api_url.trim_end_matches('/');
         let email = email.trim().to_lowercase();
         let security_url = format!("{drive_api_url}/auth/login");
@@ -1196,43 +1280,99 @@ impl InternxtNativeClient {
         ))
     }
 
-    pub fn set_file_timestamp(&self, file_uuid: &str, timestamp: &str) -> Result<()> {
-        let metadata = self.file_metadata(file_uuid)?;
-        let body = serde_json::to_vec(&serde_json::json!({
-            "plainName": metadata.get("plainName").and_then(|v| v.as_str()).unwrap_or(""),
-            "type": metadata.get("type").and_then(|v| v.as_str()).unwrap_or("file"),
-            "modificationTime": timestamp,
-        }))?;
-        let url = format!("{}/files/{file_uuid}/meta", self.base_url);
-        let response = self.bearer_request(reqwest::Method::PUT, &url, body)?;
-        if !response.status().is_success() {
-            return Err(anyhow!(
-                "Internxt file timestamp update returned {}: {}",
-                response.status(),
-                response.text().unwrap_or_default()
-            ));
-        }
-        self.clear_listing_cache();
-        Ok(())
+    /// Always fails with [`TimestampUpdateUnsupported`] without a request;
+    /// pass times at upload instead (see [`Self::with_entry_times`]).
+    pub fn set_file_timestamp(&self, _file_uuid: &str, _timestamp: &str) -> Result<()> {
+        Err(TimestampUpdateUnsupported { kind: "file" }.into())
     }
 
-    pub fn set_folder_timestamp(&self, folder_uuid: &str, timestamp: &str) -> Result<()> {
-        let metadata = self.folder_metadata(folder_uuid)?;
-        let body = serde_json::to_vec(&serde_json::json!({
-            "plainName": metadata.get("plainName").and_then(|v| v.as_str()).unwrap_or(""),
-            "modificationTime": timestamp,
-        }))?;
-        let url = format!("{}/folders/{folder_uuid}/meta", self.base_url);
-        let response = self.bearer_request(reqwest::Method::PUT, &url, body)?;
-        if !response.status().is_success() {
+    /// Always fails with [`TimestampUpdateUnsupported`] without a request;
+    /// pass times to [`Self::create_folder_with_times`] instead.
+    pub fn set_folder_timestamp(&self, _folder_uuid: &str, _timestamp: &str) -> Result<()> {
+        Err(TimestampUpdateUnsupported { kind: "folder" }.into())
+    }
+
+    /// Run `action` with `times` attached to every file entry it creates
+    /// (`POST /files` accepts `creationTime`/`modificationTime`).
+    pub fn with_entry_times<T>(
+        &self,
+        times: ItemTimes,
+        action: impl FnOnce() -> Result<T>,
+    ) -> Result<T> {
+        struct Reset<'a>(&'a Mutex<Option<ItemTimes>>);
+        impl Drop for Reset<'_> {
+            fn drop(&mut self) {
+                if let Ok(mut slot) = self.0.lock() {
+                    *slot = None;
+                }
+            }
+        }
+        *self
+            .entry_times
+            .lock()
+            .map_err(|_| anyhow!("entry time lock poisoned"))? = Some(times);
+        let _reset = Reset(&self.entry_times);
+        action()
+    }
+
+    fn with_times(&self, mut body: serde_json::Value) -> serde_json::Value {
+        if let Ok(slot) = self.entry_times.lock() {
+            if let Some(times) = slot.as_ref() {
+                times.apply(&mut body);
+            }
+        }
+        body
+    }
+
+    /// Server-side fuzzy search over file and folder names: `POST
+    /// /fuzzy/{search}` with a JSON body, as drive-server-wip's
+    /// `FuzzySearchController` and `@internxt/sdk` `getGlobalSearchItems`
+    /// use it (the former `GET` form returns 404).
+    pub fn fuzzy_search(
+        &self,
+        query: &str,
+        offset: u64,
+        filters: &FuzzySearchFilters,
+    ) -> Result<Vec<FuzzySearchHit>> {
+        let text = query.trim();
+        let length = text.chars().count();
+        if !(FUZZY_SEARCH_MIN_LENGTH..=FUZZY_SEARCH_MAX_LENGTH).contains(&length) {
             return Err(anyhow!(
-                "Internxt folder timestamp update returned {}: {}",
-                response.status(),
-                response.text().unwrap_or_default()
+                "search text must be {FUZZY_SEARCH_MIN_LENGTH}-{FUZZY_SEARCH_MAX_LENGTH} characters (Internxt API limit)"
             ));
         }
-        self.clear_listing_cache();
-        Ok(())
+        let mut url = reqwest::Url::parse(&format!("{}/fuzzy/", self.base_url))?;
+        url.path_segments_mut()
+            .map_err(|_| anyhow!("invalid Internxt URL"))?
+            .pop_if_empty()
+            .push(text);
+        let mut body = serde_json::json!({ "offset": offset });
+        let object = body.as_object_mut().expect("object literal");
+        if !filters.types.is_empty() {
+            object.insert("type".into(), filters.types.clone().into());
+        }
+        if let Some(value) = filters.min_size {
+            object.insert("minSize".into(), value.into());
+        }
+        if let Some(value) = filters.max_size {
+            object.insert("maxSize".into(), value.into());
+        }
+        if let Some(value) = &filters.modified_after {
+            object.insert("modifiedAfter".into(), value.clone().into());
+        }
+        if let Some(value) = &filters.modified_before {
+            object.insert("modifiedBefore".into(), value.clone().into());
+        }
+        let url = url.to_string();
+        let value = self.json_response(
+            self.bearer_request(reqwest::Method::POST, &url, serde_json::to_vec(&body)?)?,
+            &url,
+        )?;
+        let data = value
+            .get("data")
+            .cloned()
+            .ok_or_else(|| anyhow!("Internxt search returned no data list"))?;
+        serde_json::from_value(data).context("parsing Internxt search results")
     }
 
     fn json_response(&self, response: Response, url: &str) -> Result<serde_json::Value> {
@@ -1452,7 +1592,7 @@ impl InternxtNativeClient {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow!("Internxt upload finish returned no file id"))?;
         let create_url = format!("{}/files", self.base_url);
-        let create_body = serde_json::to_vec(&serde_json::json!({
+        let create_body = serde_json::to_vec(&self.with_times(serde_json::json!({
             "folderUuid": parent_folder_uuid,
             "plainName": plain_name,
             "type": file_type,
@@ -1461,7 +1601,7 @@ impl InternxtNativeClient {
             "fileId": network_file_id,
             "encryptVersion": "Aes03",
             "name": ""
-        }))?;
+        })))?;
         self.json_response(
             self.bearer_request(reqwest::Method::POST, &create_url, create_body)?,
             &create_url,
@@ -1677,11 +1817,11 @@ impl InternxtNativeClient {
             self.bearer_request(
                 reqwest::Method::POST,
                 &create_url,
-                serde_json::to_vec(&serde_json::json!({
+                serde_json::to_vec(&self.with_times(serde_json::json!({
                     "folderUuid": parent_folder_uuid, "plainName": plain_name,
                     "type": file_type, "size": file_size, "bucket": session.bucket_id,
                     "fileId": network_file_id, "encryptVersion": "Aes03", "name": ""
-                }))?,
+                })))?,
             )?,
             &create_url,
         )?;
@@ -2048,7 +2188,7 @@ impl InternxtNativeClient {
             self.bearer_request(
                 reqwest::Method::POST,
                 &create_url,
-                serde_json::to_vec(&serde_json::json!({
+                serde_json::to_vec(&self.with_times(serde_json::json!({
                     "folderUuid": parent_folder_uuid,
                     "plainName": plain_name,
                     "type": file_type,
@@ -2057,7 +2197,7 @@ impl InternxtNativeClient {
                     "fileId": network_file_id,
                     "encryptVersion": "Aes03",
                     "name": ""
-                }))?,
+                })))?,
             )?,
             &create_url,
         )?;
@@ -2808,11 +2948,24 @@ impl InternxtNativeClient {
     }
 
     pub fn create_folder(&self, parent_uuid: &str, name: &str) -> Result<String> {
+        self.create_folder_with_times(parent_uuid, name, &ItemTimes::default())
+    }
+
+    /// `POST /folders` with optional `creationTime`/`modificationTime`: the
+    /// only way Internxt sets folder timestamps.
+    pub fn create_folder_with_times(
+        &self,
+        parent_uuid: &str,
+        name: &str,
+        times: &ItemTimes,
+    ) -> Result<String> {
         let url = format!("{}/folders", self.base_url);
-        let body = serde_json::to_vec(&serde_json::json!({
+        let mut body = serde_json::json!({
             "plainName": name,
             "parentFolderUuid": parent_uuid
-        }))?;
+        });
+        times.apply(&mut body);
+        let body = serde_json::to_vec(&body)?;
         let value = self.json_response(
             self.bearer_request(reqwest::Method::POST, &url, body)?,
             &url,
@@ -3104,7 +3257,6 @@ impl InternxtNativeClient {
             let metadata = entry.metadata()?;
             if metadata.is_dir() {
                 let remote = self.existing_child(remote_parent_uuid, &name, true)?;
-                let folder_was_created = remote.is_none();
                 let folder_uuid = match remote {
                     Some(item) => match policy {
                         ConflictPolicy::Fail => {
@@ -3112,13 +3264,15 @@ impl InternxtNativeClient {
                         }
                         ConflictPolicy::Skip | ConflictPolicy::Overwrite => item.uuid,
                     },
-                    None => self.create_folder(remote_parent_uuid, &name)?,
-                };
-                if options.preserve_timestamps && folder_was_created {
-                    if let Ok(timestamp) = local_timestamp(&metadata) {
-                        self.set_folder_timestamp(&folder_uuid, &timestamp)?;
+                    None => {
+                        let times = if options.preserve_timestamps {
+                            local_item_times(&metadata)
+                        } else {
+                            ItemTimes::default()
+                        };
+                        self.create_folder_with_times(remote_parent_uuid, &name, &times)?
                     }
-                }
+                };
                 stats.folders += 1;
                 report_progress(options, &local, stats, 0);
                 self.upload_directory_contents(
@@ -3161,17 +3315,12 @@ impl InternxtNativeClient {
                         }
                     }
                 }
-                self.upload_path(session, remote_parent_uuid, stem, extension, &local)?;
                 if options.preserve_timestamps {
-                    if let Some(item) = self.wait_for_child(
-                        remote_parent_uuid,
-                        &format_remote_name(stem, extension),
-                        false,
-                    )? {
-                        if let Ok(timestamp) = local_timestamp(&metadata) {
-                            self.set_file_timestamp(&item.uuid, &timestamp)?;
-                        }
-                    }
+                    self.with_entry_times(local_item_times(&metadata), || {
+                        self.upload_path(session, remote_parent_uuid, stem, extension, &local)
+                    })?;
+                } else {
+                    self.upload_path(session, remote_parent_uuid, stem, extension, &local)?;
                 }
                 stats.files += 1;
                 stats.bytes += metadata.len();
@@ -3389,11 +3538,17 @@ fn wildcard_matches(value: &str, pattern: &str, case_sensitive: bool) -> bool {
     previous[pattern.len()]
 }
 
-fn local_timestamp(metadata: &fs::Metadata) -> Result<String> {
-    let modified = metadata
-        .modified()
-        .context("reading local modification time")?;
-    Ok(chrono::DateTime::<chrono::Utc>::from(modified).to_rfc3339())
+/// Local times for an item created on Internxt (birth time where the
+/// platform reports it).
+fn local_item_times(metadata: &fs::Metadata) -> ItemTimes {
+    let iso = |time: std::io::Result<std::time::SystemTime>| {
+        time.ok()
+            .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339())
+    };
+    ItemTimes {
+        creation_time: iso(metadata.created()),
+        modification_time: iso(metadata.modified()),
+    }
 }
 
 fn set_local_timestamp(path: &Path, timestamp: &str) -> Result<()> {
@@ -3465,6 +3620,26 @@ fn item_name(item: &serde_json::Value, kind: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn entry_times_apply_only_inside_the_scope_and_reset_after_errors() {
+        let client = InternxtNativeClient::new("http://127.0.0.1:9", "t").unwrap();
+        let body = || serde_json::json!({"folderUuid": "p", "name": ""});
+        assert_eq!(client.with_times(body()), body());
+        let times = ItemTimes {
+            creation_time: Some("2020-01-01T00:00:00Z".into()),
+            modification_time: Some("2021-01-01T00:00:00Z".into()),
+        };
+        let inside = client
+            .with_entry_times(times.clone(), || Ok(client.with_times(body())))
+            .unwrap();
+        assert_eq!(inside["creationTime"], "2020-01-01T00:00:00Z");
+        assert_eq!(inside["modificationTime"], "2021-01-01T00:00:00Z");
+        assert_eq!(client.with_times(body()), body());
+        let failed: Result<()> = client.with_entry_times(times, || Err(anyhow!("upload failed")));
+        assert!(failed.is_err());
+        assert_eq!(client.with_times(body()), body(), "reset after an error");
+    }
+
     use super::*;
 
     const MNEMONIC: &str = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";

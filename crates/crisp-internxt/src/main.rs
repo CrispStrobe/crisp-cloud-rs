@@ -101,6 +101,26 @@ enum Command {
         #[arg(long, default_value_t = -1)]
         max_depth: isize,
     },
+    /// Server-side fuzzy name search (POST /fuzzy/{query}); 3-255 characters.
+    Fuzzy {
+        session: PathBuf,
+        query: String,
+        #[arg(long)]
+        offset: Option<u64>,
+        /// File extension to include (repeatable); "folder" includes folders.
+        #[arg(long = "type")]
+        types: Vec<String>,
+        #[arg(long)]
+        min_size: Option<u64>,
+        #[arg(long)]
+        max_size: Option<u64>,
+        /// ISO 8601 date.
+        #[arg(long)]
+        modified_after: Option<String>,
+        /// ISO 8601 date.
+        #[arg(long)]
+        modified_before: Option<String>,
+    },
     /// Copy a remote file or folder into another remote folder.
     Copy {
         session: PathBuf,
@@ -117,7 +137,9 @@ enum Command {
         remote: PathBuf,
         local: PathBuf,
     },
-    /// Set a remote file or folder modification timestamp.
+    /// Set a remote modification timestamp. Internxt only accepts times when an
+    /// item is created or uploaded, so this reports that it is unsupported;
+    /// use `upload --preserve-timestamps` instead.
     Touch {
         session: PathBuf,
         remote: PathBuf,
@@ -393,6 +415,31 @@ fn run() -> Result<()> {
                     result.item.uuid,
                     result.item.size,
                     result.path.display()
+                );
+            }
+        }
+        Command::Fuzzy {
+            session,
+            query,
+            offset,
+            types,
+            min_size,
+            max_size,
+            modified_after,
+            modified_before,
+        } => {
+            let (client, _) = open(&session)?;
+            let filters = crisp_internxt::FuzzySearchFilters {
+                types,
+                min_size,
+                max_size,
+                modified_after,
+                modified_before,
+            };
+            for hit in client.fuzzy_search(&query, offset.unwrap_or(0), &filters)? {
+                println!(
+                    "{}\t{}\t{:.3}\t{}",
+                    hit.item_id, hit.item_type, hit.similarity, hit.name
                 );
             }
         }

@@ -31,6 +31,12 @@ fn type_names() {
 }
 ```
 
+## Application integration and source pins
+
+Applications can use the shared crate or either provider crate independently. [CrispCloud](https://github.com/CrispStrobe/CrispCloud) also carries vendored native provider sources with their own [upstream record](https://github.com/CrispStrobe/CrispCloud/blob/main/packages/crisp_storage/native/UPSTREAM-CLOUD.md). Updating this repository does not change that consumer pin; provider changes need an explicit consumer sync and its bridge, license and transfer checks.
+
+Use `cargo test --workspace --locked` for the local workspace contracts. Credential-dependent live suites remain separate from fixture tests; API compatibility and successful fixture tests do not establish live-provider interoperability for every operation.
+
 ## Execution model
 
 The 0.x API is explicitly blocking-only. Both provider clients use blocking

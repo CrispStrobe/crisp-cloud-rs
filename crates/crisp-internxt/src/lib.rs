@@ -2791,10 +2791,12 @@ impl InternxtNativeClient {
             modified_at: None,
         };
         for component in path.components() {
-            let component = component.as_os_str().to_string_lossy();
-            if component.is_empty() || component == "." || component == "/" {
+            // Only normal segments name folders: the root is `/` on Unix but
+            // `\` (plus a drive prefix) on Windows.
+            let std::path::Component::Normal(component) = component else {
                 continue;
-            }
+            };
+            let component = component.to_string_lossy();
             if !current.is_dir {
                 return Err(anyhow!("Internxt path traverses through a file"));
             }
@@ -3681,6 +3683,37 @@ mod tests {
         assert_eq!(stats.bytes, 6);
         assert!(inspect_local_directory(&root.join("a.txt")).is_err());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn root_resolves_without_network_on_every_platform() {
+        // The API is unreachable, so any listing request would fail. On
+        // Windows the root component is `\`, which must not be looked up as
+        // a folder name.
+        let client = InternxtNativeClient::new("http://127.0.0.1:1", "token").unwrap();
+        let session = InternxtSession {
+            drive_api_url: "http://127.0.0.1:1".into(),
+            network_url: "http://127.0.0.1:1".into(),
+            email: String::new(),
+            token: String::new(),
+            new_token: String::new(),
+            mnemonic: MNEMONIC.into(),
+            user_id: String::new(),
+            root_folder_id: "root".into(),
+            bridge_user: String::new(),
+            bucket_id: "00".repeat(12),
+        };
+        let mut roots = vec!["/", "", "."];
+        if cfg!(windows) {
+            roots.extend(["\\", "C:\\"]);
+        }
+        for root in roots {
+            let item = client
+                .resolve_path(&session, std::path::Path::new(root))
+                .unwrap();
+            assert!(item.is_dir);
+            assert_eq!(item.uuid, "root");
+        }
     }
 
     #[test]

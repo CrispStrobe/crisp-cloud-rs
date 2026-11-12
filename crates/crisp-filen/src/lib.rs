@@ -1256,10 +1256,12 @@ impl FilenNativeClient {
         };
         let mut current = root;
         for component in path.components() {
-            let part = component.as_os_str().to_string_lossy();
-            if part.is_empty() || part == "." || part == "/" {
+            // Only normal segments name folders: the root is `/` on Unix but
+            // `\` (plus a drive prefix) on Windows.
+            let std::path::Component::Normal(part) = component else {
                 continue;
-            }
+            };
+            let part = part.to_string_lossy();
             current = self
                 .list_folder(&current.uuid)?
                 .into_iter()
@@ -3145,6 +3147,29 @@ mod tests {
             kek: None,
             private_key: None,
             hmac_key: None,
+        }
+    }
+
+    #[test]
+    fn root_resolves_without_network_on_every_platform() {
+        // The gateway is unreachable, so any listing request would fail. On
+        // Windows the root component is `\`, which must not be looked up as
+        // a folder name.
+        let session = test_session("http://127.0.0.1:1".into());
+        let client = FilenNativeClient::from_session(&session).unwrap();
+        for root in ["/", "", "."] {
+            let item = client
+                .resolve_path(&session, std::path::Path::new(root))
+                .unwrap();
+            assert!(item.is_dir);
+            assert_eq!(item.uuid, "root");
+        }
+        #[cfg(windows)]
+        for root in ["\\", "C:\\"] {
+            let item = client
+                .resolve_path(&session, std::path::Path::new(root))
+                .unwrap();
+            assert_eq!(item.uuid, "root");
         }
     }
 

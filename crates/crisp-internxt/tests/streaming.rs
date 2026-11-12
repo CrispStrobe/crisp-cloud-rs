@@ -429,8 +429,7 @@ fn generic_session(address: std::net::SocketAddr, bucket: &str) -> InternxtSessi
 fn upload_reader_progress_callback_reports_bytes_and_returns_plaintext_sha256() {
     let bucket = "00".repeat(12);
     let plaintext = b"sorter-style progress callback upload".to_vec();
-    let (address, uploaded) =
-        spawn_generic_transfer_server(bucket.clone(), [0; 32], Vec::new(), 0);
+    let (address, uploaded) = spawn_generic_transfer_server(bucket.clone(), [0; 32], Vec::new(), 0);
     let session = generic_session(address, &bucket);
     let client = InternxtNativeClient::new(&session.drive_api_url, session.active_token()).unwrap();
     let (callback, seen) = recording_callback();

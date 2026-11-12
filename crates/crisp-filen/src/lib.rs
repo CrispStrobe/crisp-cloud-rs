@@ -23,6 +23,10 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
+/// Sent on every request. Internxt's Cloudflare front rejects requests
+/// without a User-Agent with 403 Forbidden (reqwest sends none by default).
+pub const HTTP_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
+
 pub const DEFAULT_GATEWAY_URL: &str = "https://gateway.filen.io";
 pub const DEFAULT_INGEST_URL: &str = "https://ingest.filen.io";
 pub const DEFAULT_EGEST_URL: &str = "https://egest.filen.io";
@@ -89,7 +93,9 @@ impl HttpConfig {
     pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
     fn build_client(&self) -> Result<reqwest::blocking::Client> {
-        let mut builder = reqwest::blocking::Client::builder().timeout(Self::REQUEST_TIMEOUT);
+        let mut builder = reqwest::blocking::Client::builder()
+            .user_agent(HTTP_USER_AGENT)
+            .timeout(Self::REQUEST_TIMEOUT);
         if let Some(url) = &self.proxy_url {
             let mut proxy = reqwest::Proxy::all(url)
                 .with_context(|| format!("invalid Filen proxy URL: {url}"))?;
@@ -1335,6 +1341,7 @@ impl FilenNativeClient {
         tfa: Option<&str>,
     ) -> Result<FilenSession> {
         let http = reqwest::blocking::Client::builder()
+            .user_agent(HTTP_USER_AGENT)
             .timeout(Duration::from_secs(30))
             .build()?;
         let base = gateway_url.trim_end_matches('/');
@@ -3350,8 +3357,7 @@ mod tests {
         assert_eq!(HttpConfig::default().proxy_url, None);
         assert_eq!(HttpConfig::REQUEST_TIMEOUT, Duration::from_secs(30));
         let session = test_session("http://127.0.0.1:1".into());
-        FilenNativeClient::from_session_with_http_config(&session, &HttpConfig::default())
-            .unwrap();
+        FilenNativeClient::from_session_with_http_config(&session, &HttpConfig::default()).unwrap();
         FilenNativeClient::from_session_with_configs(
             &session,
             TransferConfig::default(),
@@ -3382,9 +3388,10 @@ mod tests {
         );
         let expected = base64::engine::general_purpose::STANDARD.encode("proxy-user:proxy-pass");
         assert!(
-            request
-                .to_ascii_lowercase()
-                .contains(&format!("proxy-authorization: basic {}", expected.to_ascii_lowercase())),
+            request.to_ascii_lowercase().contains(&format!(
+                "proxy-authorization: basic {}",
+                expected.to_ascii_lowercase()
+            )),
             "missing proxy credentials"
         );
     }
@@ -3398,8 +3405,14 @@ mod tests {
         ]);
         let mut client = FilenNativeClient::from_session(&test_session(gateway)).unwrap();
         client.set_listing_cache_ttl(Duration::ZERO);
-        assert_eq!(client.list_trash_filtered(Some("folder"), 1).unwrap().len(), 1);
-        assert!(client.list_trash_filtered(Some("file"), 10).unwrap().is_empty());
+        assert_eq!(
+            client.list_trash_filtered(Some("folder"), 1).unwrap().len(),
+            1
+        );
+        assert!(client
+            .list_trash_filtered(Some("file"), 10)
+            .unwrap()
+            .is_empty());
         assert!(client.list_trash_filtered(None, 0).unwrap().is_empty());
         assert!(client.list_trash_filtered(Some("bogus"), 10).is_err());
     }
@@ -3468,8 +3481,13 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["folder-1"]
         );
-        assert_eq!(filter_trash_items(items.clone(), None, 10).unwrap().len(), 3);
-        assert!(filter_trash_items(items.clone(), None, 0).unwrap().is_empty());
+        assert_eq!(
+            filter_trash_items(items.clone(), None, 10).unwrap().len(),
+            3
+        );
+        assert!(filter_trash_items(items.clone(), None, 0)
+            .unwrap()
+            .is_empty());
         assert!(filter_trash_items(items, Some("other"), 10).is_err());
     }
 

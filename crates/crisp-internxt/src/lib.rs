@@ -25,6 +25,10 @@ use std::sync::{
 use std::time::{Duration, Instant};
 use unicode_normalization::UnicodeNormalization;
 
+/// Sent on every request. Internxt's Cloudflare front rejects requests
+/// without a User-Agent with 403 Forbidden (reqwest sends none by default).
+pub const HTTP_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
+
 type Aes256Ctr = Ctr128BE<Aes256>;
 type Aes256CbcEnc = cbc::Encryptor<Aes256>;
 type Aes256CbcDec = cbc::Decryptor<Aes256>;
@@ -80,6 +84,7 @@ impl HttpConfig {
 
     fn build_client(&self, timeout: Duration) -> Result<Client> {
         let mut builder = Client::builder()
+            .user_agent(HTTP_USER_AGENT)
             .connect_timeout(Self::CONNECT_TIMEOUT)
             .http1_only()
             .timeout(timeout);
@@ -401,10 +406,7 @@ pub type ProgressCallback = Arc<dyn Fn(TransferProgress) + Send + Sync>;
 
 /// Adapt a shared [`ProgressCallback`] to the `(completed, total)` byte
 /// callback used by the single-file transfer methods.
-fn byte_progress_adapter(
-    path: &str,
-    callback: ProgressCallback,
-) -> impl FnMut(u64, u64) + 'static {
+fn byte_progress_adapter(path: &str, callback: ProgressCallback) -> impl FnMut(u64, u64) + 'static {
     let path = PathBuf::from(path);
     move |completed_bytes, total_bytes| {
         callback(TransferProgress {
@@ -862,6 +864,7 @@ impl InternxtNativeClient {
         tfa_code: Option<&str>,
     ) -> Result<InternxtSession> {
         let http = Client::builder()
+            .user_agent(HTTP_USER_AGENT)
             .http1_only()
             .build()
             .context("building Internxt login HTTP client")?;
@@ -3813,9 +3816,10 @@ mod tests {
             request.lines().next().unwrap_or_default()
         );
         let expected = base64_basic("proxy-user:proxy-pass");
-        assert!(request
-            .to_ascii_lowercase()
-            .contains(&format!("proxy-authorization: basic {}", expected.to_ascii_lowercase())));
+        assert!(request.to_ascii_lowercase().contains(&format!(
+            "proxy-authorization: basic {}",
+            expected.to_ascii_lowercase()
+        )));
     }
 
     fn base64_basic(value: &str) -> String {
@@ -3824,7 +3828,11 @@ mod tests {
         let bytes = value.as_bytes();
         let mut out = String::new();
         for chunk in bytes.chunks(3) {
-            let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+            let b = [
+                chunk[0],
+                *chunk.get(1).unwrap_or(&0),
+                *chunk.get(2).unwrap_or(&0),
+            ];
             let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
             for i in 0..4 {
                 if i <= chunk.len() {

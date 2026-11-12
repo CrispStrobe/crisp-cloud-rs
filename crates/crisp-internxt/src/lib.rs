@@ -1203,6 +1203,34 @@ impl InternxtNativeClient {
         file_uuid: &str,
         replacement: &Path,
     ) -> Result<()> {
+        self.update_file_with(file_uuid, |parent, name, file_type| {
+            self.upload_path(session, parent, name, file_type, replacement)
+        })
+    }
+
+    /// [`Self::update_file`] for a replacement read from `reader` (`size`
+    /// plaintext bytes) instead of a local path. The original stays in place
+    /// until the replacement upload is visible, so a failed upload leaves it
+    /// untouched; only the final trash-and-rename swap remains.
+    pub fn update_file_from_reader<R: Read>(
+        &self,
+        session: &InternxtSession,
+        file_uuid: &str,
+        reader: R,
+        size: u64,
+    ) -> Result<()> {
+        self.update_file_with(file_uuid, |parent, name, file_type| {
+            self.upload_reader(session, parent, name, file_type, reader, size)
+        })
+    }
+
+    /// Upload-beside-then-swap shared by the update entry points. `upload`
+    /// receives the parent folder, a temporary plain name and the file type.
+    fn update_file_with(
+        &self,
+        file_uuid: &str,
+        upload: impl FnOnce(&str, &str, &str) -> Result<()>,
+    ) -> Result<()> {
         let metadata = self.file_metadata(file_uuid)?;
         let parent = metadata
             .get("folderUuid")
@@ -1214,12 +1242,14 @@ impl InternxtNativeClient {
             .or_else(|| metadata.get("name"))
             .and_then(|value| value.as_str())
             .ok_or_else(|| anyhow!("Internxt file metadata has no plain name"))?;
+        // A missing/null type means no extension (as in `item_name`), not
+        // "file": defaulting to "file" renamed `report` to `report.file`.
         let file_type = metadata
             .get("type")
             .and_then(|value| value.as_str())
-            .unwrap_or("file");
+            .unwrap_or("");
         let temporary_name = format!(".crispsorter-update-{}", transfer_token());
-        self.upload_path(session, parent, &temporary_name, file_type, replacement)?;
+        upload(parent, &temporary_name, file_type)?;
         let temporary = self
             .wait_for_child(
                 parent,
@@ -1280,7 +1310,7 @@ impl InternxtNativeClient {
         let file_type = metadata
             .get("type")
             .and_then(|value| value.as_str())
-            .unwrap_or("file");
+            .unwrap_or("");
         let remote_name = format_remote_name(name, file_type);
         if let Some(existing) = self.existing_child(destination_folder_uuid, &remote_name, false)? {
             match policy {
@@ -2660,10 +2690,89 @@ impl InternxtNativeClient {
         Ok(())
     }
 
+    /// Download and decrypt `length` plaintext bytes starting at `offset`
+    /// (clamped to the file size) without fetching the rest of the file.
+    ///
+    /// One HTTP range is requested from the enclosing 16-byte AES-CTR block
+    /// and decrypted in place with [`crypt_at`]. Presigned shard URLs are not
+    /// consistently range-aware in production, so a full-object reply
+    /// (HTTP 200) is streamed instead: its prefix is skipped, not buffered.
+    pub fn download_file_range(
+        &self,
+        session: &InternxtSession,
+        file_uuid: &str,
+        offset: u64,
+        length: u64,
+    ) -> Result<Vec<u8>> {
+        let metadata = self.file_metadata(file_uuid)?;
+        let size = metadata
+            .get("size")
+            .and_then(|value| value.as_u64().or_else(|| value.as_str()?.parse().ok()))
+            .ok_or_else(|| anyhow!("Internxt file metadata has no size"))?;
+        anyhow::ensure!(offset <= size, "Internxt range starts beyond file size");
+        let end = offset.saturating_add(length).min(size);
+        if end <= offset {
+            return Ok(Vec::new());
+        }
+        let bucket_id = metadata
+            .get("bucket")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| anyhow!("Internxt file metadata has no bucket"))?;
+        let network_id = metadata
+            .get("fileId")
+            .and_then(|value| value.as_str())
+            .ok_or_else(|| anyhow!("Internxt file metadata has no network file id"))?;
+        let (url, index_hex) = self.download_links(session, bucket_id, network_id)?;
+        let index: [u8; 32] = hex::decode(index_hex)?
+            .try_into()
+            .map_err(|_| anyhow!("Internxt file index must contain 32 bytes"))?;
+        let bucket: [u8; 12] = hex::decode(bucket_id)?
+            .try_into()
+            .map_err(|_| anyhow!("Internxt bucket must contain 12 bytes"))?;
+        let aligned = offset - offset % 16;
+        let wanted = end - aligned;
+        let mut response = self
+            .http
+            .get(&url)
+            .header("range", format!("bytes={aligned}-{}", end - 1))
+            .send()
+            .context("requesting Internxt shard range")?;
+        match response.status().as_u16() {
+            206 => {}
+            200 => {
+                let skipped =
+                    std::io::copy(&mut (&mut response).take(aligned), &mut std::io::sink())
+                        .context("skipping to the requested Internxt range")?;
+                anyhow::ensure!(
+                    skipped == aligned,
+                    "Internxt download ended before the requested range"
+                );
+            }
+            _ => {
+                return Err(anyhow!(
+                    "Internxt shard range download returned {}",
+                    response.status()
+                ))
+            }
+        }
+        let mut encrypted = Vec::with_capacity(wanted as usize);
+        (&mut response)
+            .take(wanted)
+            .read_to_end(&mut encrypted)
+            .context("reading Internxt shard range")?;
+        anyhow::ensure!(
+            encrypted.len() as u64 == wanted,
+            "Internxt range returned {} bytes, expected {wanted}",
+            encrypted.len()
+        );
+        crypt_at(&mut encrypted, &session.mnemonic, &bucket, &index, aligned)?;
+        encrypted.drain(..(offset - aligned) as usize);
+        Ok(encrypted)
+    }
+
     /// Download a large file through bounded, concurrent HTTP ranges. S3
     /// presigned URLs normally honor `Range`; when the probe returns a full
     /// object (HTTP 200), this falls back to the sequential streaming path.
-    /// Download a large file through bounded, concurrent HTTP ranges. S3
     pub fn download_file_to_path_ranged(
         &self,
         session: &InternxtSession,
@@ -3764,10 +3873,14 @@ fn set_local_timestamp(path: &Path, timestamp: &str) -> Result<()> {
         .with_context(|| format!("setting modification time on {}", path.display()))
 }
 
+/// Split a remote file name into Internxt's `plainName` and `type`. A name
+/// without an extension has an empty type, as the official clients send and
+/// as [`item_name`] reads it back; a `"file"` placeholder would turn `README`
+/// into `README.file` and never match the existing remote entry.
 fn split_remote_name(name: &str) -> (&str, &str) {
     match name.rsplit_once('.') {
         Some((stem, extension)) if !stem.is_empty() => (stem, extension),
-        _ => (name, "file"),
+        _ => (name, ""),
     }
 }
 
@@ -4584,5 +4697,46 @@ mod tests {
         assert_eq!(client.load_upload_resume_state(&path).unwrap(), Some(state));
         client.clear_upload_resume_state(&path);
         assert_eq!(client.load_upload_resume_state(&path).unwrap(), None);
+    }
+
+    #[test]
+    fn extensionless_names_round_trip_with_an_empty_type() {
+        for name in ["photo.jpg", "README", ".profile", "archive.tar.gz"] {
+            let (stem, extension) = split_remote_name(name);
+            assert_eq!(format_remote_name(stem, extension), name);
+            let listed = serde_json::json!({ "plainName": stem, "type": extension });
+            assert_eq!(item_name(&listed, "files"), name);
+        }
+        assert_eq!(split_remote_name("README"), ("README", ""));
+    }
+
+    /// Cross-checks the key derivations against an independent implementation,
+    /// the MIT-licensed `internxt-core` crate (Bebbssos/internxt-core-rust),
+    /// so a shared misreading of the protocol cannot hide in our own vectors.
+    #[test]
+    fn crypto_matches_the_independent_internxt_core_engine() {
+        let bucket_hex = hex::encode(BUCKET);
+        assert_eq!(
+            file_key(MNEMONIC, &BUCKET, &INDEX),
+            internxt_core::crypto::generate_file_key(MNEMONIC, &bucket_hex, &INDEX).unwrap()
+        );
+        let session = InternxtSession {
+            user_id: "user-id".into(),
+            bucket_id: bucket_hex,
+            ..empty_session()
+        };
+        assert_eq!(
+            session.bridge_pass(),
+            internxt_core::crypto::network_password("user-id")
+        );
+        assert_eq!(
+            password_hash("password123", "00112233445566778899aabbccddeeff").unwrap(),
+            internxt_core::crypto::pass_to_hash(
+                "password123",
+                Some("00112233445566778899aabbccddeeff")
+            )
+            .unwrap()
+            .1
+        );
     }
 }

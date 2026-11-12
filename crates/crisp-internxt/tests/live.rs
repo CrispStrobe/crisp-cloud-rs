@@ -736,3 +736,64 @@ fn load_env_file(path: &Path, values: &mut std::collections::HashMap<String, Str
         values.insert(key.trim().to_owned(), value.to_owned());
     }
 }
+
+#[test]
+fn empty_files_are_rejected_before_any_request() {
+    // A session pointing at an unroutable host: a request would fail with a
+    // network error instead of the explicit message.
+    let client = InternxtNativeClient::new("http://127.0.0.1:9", "token").unwrap();
+    let unroutable = "http://127.0.0.1:9".to_owned();
+    let session = InternxtSession {
+        drive_api_url: unroutable.clone(),
+        network_url: unroutable,
+        email: "a@b.c".into(),
+        token: "t".into(),
+        new_token: "t".into(),
+        mnemonic: "m".into(),
+        user_id: "u".into(),
+        root_folder_id: "r".into(),
+        bridge_user: "b".into(),
+        bucket_id: "00".into(),
+    };
+    let error = client
+        .upload_reader(&session, "folder", "empty", "txt", std::io::empty(), 0)
+        .unwrap_err();
+    assert!(format!("{error:#}").contains("does not support empty files"));
+}
+
+#[test]
+#[ignore = "reads a real Internxt account; run explicitly with --ignored"]
+fn live_account_usage_and_ancestors() {
+    let Some((email, password, tfa)) = credentials() else {
+        eprintln!("skipping: INTERNXT_LOGIN/INTERNXT_PW are not set");
+        return;
+    };
+    let session = InternxtNativeClient::login_without_keys(
+        DEFAULT_DRIVE_API_URL,
+        &email,
+        &password,
+        tfa.as_deref(),
+    )
+    .unwrap();
+    let client = InternxtNativeClient::new(&session.drive_api_url, &session.new_token).unwrap();
+    let usage = client.storage_usage().unwrap();
+    assert!(usage.total >= usage.drive);
+    let limit = client.storage_limit().unwrap();
+    assert!(limit > 0);
+
+    let outer_name = unique_name("crisp-cloud-rs ancestors");
+    let outer = client
+        .create_folder(&session.root_folder_id, &outer_name)
+        .unwrap();
+    let result = (|| -> Result<()> {
+        let inner = client.create_folder(&outer, "inner")?;
+        let ancestors = client.folder_ancestors(&inner)?;
+        assert!(
+            ancestors.iter().any(|(uuid, _)| uuid == &outer),
+            "{ancestors:?}"
+        );
+        Ok(())
+    })();
+    let _ = client.trash(&outer, "folder");
+    result.map_err(|e| format!("{e:#}")).unwrap();
+}

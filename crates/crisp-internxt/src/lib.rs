@@ -535,6 +535,7 @@ pub struct InternxtNativeClient {
     bearer_token: String,
     http: Client,
     listing_cache: Arc<Mutex<std::collections::HashMap<String, CachedListing>>>,
+    recent_writes: Arc<Mutex<RecentWrites>>,
     verbose: bool,
     transfer_config: TransferConfig,
     /// Times attached to file entries created inside [`Self::with_entry_times`].
@@ -858,6 +859,7 @@ impl InternxtNativeClient {
             bearer_token: bearer_token.into(),
             http,
             listing_cache: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            recent_writes: Arc::new(Mutex::new(RecentWrites::default())),
             verbose: false,
             transfer_config,
             entry_times: Arc::new(Mutex::new(None)),
@@ -1188,15 +1190,84 @@ impl InternxtNativeClient {
         self.json_response(response, &url)
     }
 
+    /// Storage usage in bytes (`GET /users/usage`: drive, backup, total), as
+    /// shown by the Python reference client's `quota` command.
+    pub fn storage_usage(&self) -> Result<StorageUsage> {
+        let url = format!("{}/users/usage", self.base_url);
+        let response = self.bearer_response(reqwest::Method::GET, &url)?;
+        Ok(StorageUsage::from_json(
+            &self.json_response(response, &url)?,
+        ))
+    }
+
+    /// Storage limit in bytes (`GET /users/limit`).
+    pub fn storage_limit(&self) -> Result<u64> {
+        let url = format!("{}/users/limit", self.base_url);
+        let response = self.bearer_response(reqwest::Method::GET, &url)?;
+        let value = self.json_response(response, &url)?;
+        json_u64(value.get("maxSpaceBytes").unwrap_or(&value))
+            .ok_or_else(|| anyhow!("Internxt storage limit response has no byte count"))
+    }
+
+    /// Server-side name search across the whole drive, as the Internxt web
+    /// app does: `POST /fuzzy/{search}` with `{"offset": n}`. Results come
+    /// from Internxt's search index, which can lag behind recent changes.
+    pub fn fuzzy_search(&self, query: &str, offset: usize) -> Result<Vec<SearchHit>> {
+        let query = query.trim();
+        anyhow::ensure!(!query.is_empty(), "search query is empty");
+        let mut url = reqwest::Url::parse(&format!("{}/fuzzy/", self.base_url))
+            .context("building Internxt search URL")?;
+        url.path_segments_mut()
+            .map_err(|_| anyhow!("Internxt search URL cannot take a path"))?
+            .pop_if_empty()
+            .push(query);
+        let url = url.to_string();
+        let body = serde_json::to_vec(&serde_json::json!({ "offset": offset }))?;
+        let response = self.bearer_request(reqwest::Method::POST, &url, body)?;
+        let value = self.json_response(response, &url)?;
+        Ok(value
+            .get("data")
+            .and_then(|v| v.as_array())
+            .map(|items| items.iter().filter_map(SearchHit::from_json).collect())
+            .unwrap_or_default())
+    }
+
+    /// Parent folders of `folder_uuid` (`GET /folders/{uuid}/ancestors`),
+    /// nearest first, as returned by the gateway.
+    pub fn folder_ancestors(&self, folder_uuid: &str) -> Result<Vec<(String, String)>> {
+        let url = format!("{}/folders/{folder_uuid}/ancestors", self.base_url);
+        let response = self.bearer_response(reqwest::Method::GET, &url)?;
+        let value = self.json_response(response, &url)?;
+        Ok(value
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| {
+                        let uuid = item.get("uuid")?.as_str()?.to_owned();
+                        let name = item
+                            .get("plainName")
+                            .or_else(|| item.get("name"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_owned();
+                        Some((uuid, name))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
     pub fn folder_metadata(&self, folder_uuid: &str) -> Result<serde_json::Value> {
         let url = format!("{}/folders/{folder_uuid}/meta", self.base_url);
         let response = self.bearer_response(reqwest::Method::GET, &url)?;
         self.json_response(response, &url)
     }
 
-    /// Update a file by streaming a replacement beside the original, then
-    /// swapping names. This preserves the gateway's immutable content model
-    /// while avoiding a plaintext buffer in memory.
+    /// Replace a file's content in place (`PUT /files/{uuid}` with the new
+    /// network file id and size), as the Internxt SDK and the Python reference
+    /// client do. The uuid, name and folder stay the same, so there is no
+    /// temporary file and no rename that could collide with the old name.
     pub fn update_file(
         &self,
         session: &InternxtSession,
@@ -1519,6 +1590,137 @@ impl InternxtNativeClient {
         serde_json::from_value(data).context("parsing Internxt search results")
     }
 
+    /// `POST /files`, retried on transient failures. Before each retry the
+    /// destination is checked for an entry with the same network file id,
+    /// because a request that failed on the way back may already have created
+    /// it (the Python reference client does the same); a file is never
+    /// registered twice.
+    fn register_file(
+        &self,
+        folder_uuid: &str,
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let url = format!("{}/files", self.base_url);
+        let file_id = body
+            .get("fileId")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let mut last_error = None;
+        for attempt in 0..=REGISTRATION_RETRY_DELAYS.len() {
+            if attempt > 0 {
+                std::thread::sleep(REGISTRATION_RETRY_DELAYS[attempt - 1]);
+                if let Some(existing) = self.find_registered_file(folder_uuid, file_id) {
+                    self.remember_registered(folder_uuid, &existing, body);
+                    return Ok(existing);
+                }
+            }
+            let result = self
+                .bearer_request(reqwest::Method::POST, &url, serde_json::to_vec(body)?)
+                .and_then(|response| self.json_response(response, &url));
+            match result {
+                Ok(value) => {
+                    self.remember_registered(folder_uuid, &value, body);
+                    return Ok(value);
+                }
+                Err(error) if is_transient_error(&error) => last_error = Some(error),
+                Err(error) => return Err(error),
+            }
+        }
+        Err(last_error
+            .unwrap_or_else(|| anyhow!("Internxt file registration failed"))
+            .context("Internxt file registration failed after retries"))
+    }
+
+    /// Raw listing lookup by network file id (absent from [`NativeItem`]).
+    fn find_registered_file(&self, folder_uuid: &str, file_id: &str) -> Option<serde_json::Value> {
+        if file_id.is_empty() {
+            return None;
+        }
+        let mut offset = 0usize;
+        loop {
+            let mut url = reqwest::Url::parse(&format!(
+                "{}/folders/content/{folder_uuid}/files/",
+                self.base_url
+            ))
+            .ok()?;
+            url.query_pairs_mut()
+                .append_pair("offset", &offset.to_string())
+                .append_pair("limit", "50")
+                .append_pair("sort", "plainName")
+                .append_pair("order", "ASC");
+            let url_text = url.to_string();
+            let response = self
+                .http
+                .get(url)
+                .bearer_auth(&self.bearer_token)
+                .header("accept", "application/json")
+                .header("internxt-client", "internxt-cli")
+                .send()
+                .ok()?;
+            let value = self.json_response(response, &url_text).ok()?;
+            let items = value
+                .get("result")
+                .or_else(|| value.get("files"))
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+            if let Some(found) = items
+                .iter()
+                .find(|item| item.get("fileId").and_then(|v| v.as_str()) == Some(file_id))
+            {
+                return Some(found.clone());
+            }
+            if items.len() < 50 {
+                return None;
+            }
+            offset += items.len();
+        }
+    }
+
+    fn remember_added(&self, folder_uuid: &str, item: NativeItem) {
+        if let Ok(mut recent) = self.recent_writes.lock() {
+            recent.add(folder_uuid, item, Instant::now());
+        }
+    }
+
+    /// Keep a just-registered file visible until the listing shows it.
+    fn remember_registered(
+        &self,
+        folder_uuid: &str,
+        created: &serde_json::Value,
+        body: &serde_json::Value,
+    ) {
+        let uuid = created
+            .get("uuid")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        if uuid.is_empty() {
+            return;
+        }
+        let source = if created.get("plainName").is_some() {
+            created
+        } else {
+            body
+        };
+        self.remember_added(
+            folder_uuid,
+            NativeItem {
+                name: item_name(source, "files"),
+                uuid: uuid.to_owned(),
+                is_dir: false,
+                size: body.get("size").and_then(|v| v.as_u64()).unwrap_or(0),
+                modified_at: None,
+            },
+        );
+    }
+
+    /// Hide a trashed or deleted item until the listing drops it.
+    fn remember_removed(&self, uuid: &str) {
+        if let Ok(mut recent) = self.recent_writes.lock() {
+            recent.hide(uuid, Instant::now());
+        }
+    }
+
     fn json_response(&self, response: Response, url: &str) -> Result<serde_json::Value> {
         let status = response.status();
         let body = response
@@ -1560,6 +1762,9 @@ impl InternxtNativeClient {
 
     pub fn download_file(&self, session: &InternxtSession, file_uuid: &str) -> Result<Vec<u8>> {
         let metadata = self.file_metadata(file_uuid)?;
+        if is_empty_file_metadata(&metadata) {
+            return Ok(Vec::new());
+        }
         let bucket = metadata
             .get("bucket")
             .and_then(|v| v.as_str())
@@ -1611,6 +1816,11 @@ impl InternxtNativeClient {
         file_type: &str,
         data: &[u8],
     ) -> Result<()> {
+        if data.is_empty() {
+            // Internxt refuses zero-byte files on every plan ("You can not
+            // have empty files"); fail before any request.
+            return Err(anyhow!("Internxt does not support empty files"));
+        }
         let bucket = session.bucket_bytes()?;
         let (index, encrypted) = encrypt(data, &session.mnemonic, &bucket);
         let index_hex = hex::encode(index);
@@ -1842,10 +2052,51 @@ impl InternxtNativeClient {
         parent_folder_uuid: &str,
         plain_name: &str,
         file_type: &str,
+        reader: R,
+        file_size: u64,
+        progress: F,
+    ) -> Result<String> {
+        if file_size == 0 {
+            // Internxt refuses zero-byte files on every plan ("You can not
+            // have empty files"); fail before any request.
+            return Err(anyhow!("Internxt does not support empty files"));
+        }
+        let (network_file_id, plain_sha256) =
+            self.upload_network_reader_with_progress(session, reader, file_size, progress)?;
+        self.register_file(
+            parent_folder_uuid,
+            &serde_json::json!({
+                "folderUuid": parent_folder_uuid, "plainName": plain_name,
+                "type": file_type, "size": file_size, "bucket": session.bucket_id,
+                "fileId": network_file_id, "encryptVersion": "Aes03", "name": ""
+            }),
+        )?;
+        self.clear_listing_cache();
+        Ok(plain_sha256)
+    }
+
+    /// Encrypt and upload content to the storage network only; returns the
+    /// network file id. The drive entry is created or replaced separately.
+    fn upload_network_reader<R: Read>(
+        &self,
+        session: &InternxtSession,
+        reader: R,
+        file_size: u64,
+    ) -> Result<String> {
+        self.upload_network_reader_with_progress(session, reader, file_size, |_, _| {})
+            .map(|(network_file_id, _)| network_file_id)
+    }
+
+    /// [`Self::upload_network_reader`] with plaintext byte progress; also
+    /// returns the plaintext SHA-256.
+    fn upload_network_reader_with_progress<R: Read, F: FnMut(u64, u64)>(
+        &self,
+        session: &InternxtSession,
         mut reader: R,
         file_size: u64,
         mut progress: F,
-    ) -> Result<String> {
+    ) -> Result<(String, String)> {
+        anyhow::ensure!(file_size > 0, "Internxt does not support empty files");
         let mut part_size = if file_size < self.transfer_config.multipart_min_size {
             file_size.max(1) as usize
         } else {
@@ -2069,6 +2320,11 @@ impl InternxtNativeClient {
         let metadata = fs::metadata(path)
             .with_context(|| format!("reading upload metadata for {}", path.display()))?;
         let file_size = metadata.len();
+        if file_size == 0 {
+            // Internxt refuses zero-byte files on every plan; fail before
+            // any request.
+            return Err(anyhow!("Internxt does not support empty files"));
+        }
         let modified_ns = file_modified_ns(path)?;
         let mut part_size = if file_size < self.transfer_config.multipart_min_size {
             file_size.max(1) as usize
@@ -2371,6 +2627,7 @@ impl InternxtNativeClient {
             )?,
             &create_url,
         )?;
+        self.clear_listing_cache();
         remove_checkpoint(cp_path);
         Ok(())
     }
@@ -2397,6 +2654,10 @@ impl InternxtNativeClient {
         mut progress: F,
     ) -> Result<u64> {
         let metadata = self.file_metadata(file_uuid)?;
+        if is_empty_file_metadata(&metadata) {
+            progress(0, 0);
+            return Ok(0);
+        }
         let bucket_id = metadata
             .get("bucket")
             .and_then(|value| value.as_str())
@@ -2496,6 +2757,9 @@ impl InternxtNativeClient {
         path: &Path,
     ) -> Result<()> {
         let metadata = self.file_metadata(file_uuid)?;
+        if is_empty_file_metadata(&metadata) {
+            return write_empty_download(path);
+        }
         let bucket = metadata
             .get("bucket")
             .and_then(|value| value.as_str())
@@ -2573,6 +2837,9 @@ impl InternxtNativeClient {
         state_path: &Path,
     ) -> Result<()> {
         let metadata = self.file_metadata(file_uuid)?;
+        if is_empty_file_metadata(&metadata) {
+            return write_empty_download(path);
+        }
         let bucket_id = metadata
             .get("bucket")
             .and_then(|value| value.as_str())
@@ -2780,6 +3047,9 @@ impl InternxtNativeClient {
         path: &Path,
     ) -> Result<()> {
         let metadata = self.file_metadata(file_uuid)?;
+        if is_empty_file_metadata(&metadata) {
+            return write_empty_download(path);
+        }
         let bucket_id = metadata
             .get("bucket")
             .and_then(|value| value.as_str())
@@ -3052,6 +3322,9 @@ impl InternxtNativeClient {
                 offset += count;
             }
         }
+        if let Ok(mut recent) = self.recent_writes.lock() {
+            entries = recent.apply(folder_uuid, entries, Instant::now());
+        }
         entries.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(entries)
     }
@@ -3265,8 +3538,18 @@ impl InternxtNativeClient {
             .and_then(|v| v.as_str())
             .map(str::to_owned)
             .ok_or_else(|| anyhow!("Internxt folder creation returned no UUID"));
-        if result.is_ok() {
+        if let Ok(uuid) = &result {
             self.clear_listing_cache();
+            self.remember_added(
+                parent_uuid,
+                NativeItem {
+                    name: name.to_owned(),
+                    uuid: uuid.clone(),
+                    is_dir: true,
+                    size: 0,
+                    modified_at: None,
+                },
+            );
         }
         result
     }
@@ -3283,6 +3566,7 @@ impl InternxtNativeClient {
             return Err(anyhow!("Internxt trash endpoint returned {status}: {body}"));
         }
         self.clear_listing_cache();
+        self.remember_removed(uuid);
         Ok(())
     }
 
@@ -3346,7 +3630,11 @@ impl InternxtNativeClient {
         kind: &str,
         destination_folder_uuid: &str,
     ) -> Result<()> {
-        self.move_item(uuid, destination_folder_uuid, kind)
+        self.move_item(uuid, destination_folder_uuid, kind)?;
+        if let Ok(mut recent) = self.recent_writes.lock() {
+            recent.hidden.remove(uuid);
+        }
+        Ok(())
     }
 
     /// Permanently delete one item that is already in trash.
@@ -3364,6 +3652,7 @@ impl InternxtNativeClient {
             ));
         }
         self.clear_listing_cache();
+        self.remember_removed(uuid);
         Ok(())
     }
 
@@ -4738,5 +5027,300 @@ mod tests {
             .unwrap()
             .1
         );
+    }
+}
+
+/// Create (or truncate) the local target of a zero-byte download.
+fn write_empty_download(path: &Path) -> Result<()> {
+    if let Some(parent) = path.parent().filter(|value| !value.as_os_str().is_empty()) {
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+    }
+    fs::File::create(path).with_context(|| format!("creating {}", path.display()))?;
+    Ok(())
+}
+
+/// Zero-byte files carry no network file id; serve them without a download.
+fn is_empty_file_metadata(metadata: &serde_json::Value) -> bool {
+    let size_is_zero = match metadata.get("size") {
+        Some(serde_json::Value::Number(n)) => n.as_u64() == Some(0),
+        Some(serde_json::Value::String(s)) => s.trim() == "0",
+        _ => false,
+    };
+    let no_file_id = metadata
+        .get("fileId")
+        .is_none_or(|v| v.is_null() || v.as_str().is_some_and(str::is_empty));
+    size_is_zero && no_file_id
+}
+
+#[cfg(test)]
+mod empty_file_tests {
+    use super::*;
+
+    #[test]
+    fn empty_metadata_detection() {
+        use serde_json::json;
+        assert!(is_empty_file_metadata(&json!({"size": 0})));
+        assert!(is_empty_file_metadata(
+            &json!({"size": "0", "fileId": null})
+        ));
+        assert!(is_empty_file_metadata(&json!({"size": 0, "fileId": ""})));
+        assert!(!is_empty_file_metadata(
+            &json!({"size": 0, "fileId": "abc"})
+        ));
+        assert!(!is_empty_file_metadata(&json!({"size": "5"})));
+        assert!(!is_empty_file_metadata(&json!({})));
+    }
+}
+
+/// One result of [`InternxtNativeClient::fuzzy_search`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchHit {
+    pub uuid: String,
+    pub name: String,
+    pub is_dir: bool,
+}
+
+impl SearchHit {
+    fn from_json(value: &serde_json::Value) -> Option<Self> {
+        Some(Self {
+            uuid: value.get("itemId")?.as_str()?.to_owned(),
+            name: value.get("name")?.as_str()?.to_owned(),
+            is_dir: value.get("itemType").and_then(|v| v.as_str()) == Some("folder"),
+        })
+    }
+}
+
+/// Byte counts from `GET /users/usage`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StorageUsage {
+    pub drive: u64,
+    pub backup: u64,
+    pub total: u64,
+}
+
+impl StorageUsage {
+    fn from_json(value: &serde_json::Value) -> Self {
+        let get = |key: &str| value.get(key).and_then(json_u64).unwrap_or(0);
+        let drive = get("drive");
+        let backup = get("backup");
+        let total = value
+            .get("total")
+            .and_then(json_u64)
+            .unwrap_or(drive.saturating_add(backup));
+        Self {
+            drive,
+            backup,
+            total,
+        }
+    }
+}
+
+fn json_u64(value: &serde_json::Value) -> Option<u64> {
+    match value {
+        serde_json::Value::Number(n) => n.as_u64().or_else(|| n.as_f64().map(|f| f as u64)),
+        serde_json::Value::String(s) => s.trim().parse().ok(),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod account_api_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn usage_parses_numbers_and_strings() {
+        let usage = StorageUsage::from_json(&json!({"drive": 10, "backup": "5", "total": 15}));
+        assert_eq!(
+            usage,
+            StorageUsage {
+                drive: 10,
+                backup: 5,
+                total: 15
+            }
+        );
+        let derived = StorageUsage::from_json(&json!({"drive": 3, "backup": 4}));
+        assert_eq!(derived.total, 7);
+        assert_eq!(StorageUsage::from_json(&json!({})), StorageUsage::default());
+    }
+
+    #[test]
+    fn search_hits_parse_the_fuzzy_schema() {
+        let hit = SearchHit::from_json(&json!({
+            "id": "x", "itemId": "u1", "itemType": "folder", "name": "Docs",
+            "rank": null, "similarity": 0.9
+        }))
+        .unwrap();
+        assert_eq!(
+            hit,
+            SearchHit {
+                uuid: "u1".into(),
+                name: "Docs".into(),
+                is_dir: true
+            }
+        );
+        let file =
+            SearchHit::from_json(&json!({"itemId": "f", "itemType": "file", "name": "a"})).unwrap();
+        assert!(!file.is_dir);
+        assert!(SearchHit::from_json(&json!({"name": "no id"})).is_none());
+    }
+
+    #[test]
+    fn json_u64_accepts_numbers_and_numeric_strings() {
+        assert_eq!(json_u64(&json!(5)), Some(5));
+        assert_eq!(json_u64(&json!("7")), Some(7));
+        assert_eq!(json_u64(&json!(2.0)), Some(2));
+        assert_eq!(json_u64(&json!("x")), None);
+    }
+}
+
+/// Waits before re-checking and retrying a failed file registration.
+#[cfg(not(test))]
+const REGISTRATION_RETRY_DELAYS: [std::time::Duration; 3] = [
+    std::time::Duration::from_secs(1),
+    std::time::Duration::from_secs(2),
+    std::time::Duration::from_secs(4),
+];
+#[cfg(test)]
+const REGISTRATION_RETRY_DELAYS: [std::time::Duration; 3] = [std::time::Duration::ZERO; 3];
+
+/// Rate limiting, gateway/server failures and transport errors.
+fn is_transient_error(error: &anyhow::Error) -> bool {
+    for cause in error.chain() {
+        if let Some(http) = cause.downcast_ref::<reqwest::Error>() {
+            if http.is_timeout() || http.is_connect() || http.is_request() {
+                return true;
+            }
+        }
+    }
+    let text = format!("{error:#}");
+    text.split(" returned ")
+        .skip(1)
+        .filter_map(|rest| rest.get(..3)?.parse::<u16>().ok())
+        .any(|status| status == 408 || status == 429 || status >= 500)
+}
+
+#[cfg(test)]
+mod registration_tests {
+    use super::*;
+
+    #[test]
+    fn transient_statuses_are_retried_others_are_not() {
+        for status in [
+            "408 Request Timeout",
+            "429 Too Many Requests",
+            "500 Internal Server Error",
+            "503 Service Unavailable",
+        ] {
+            let error = anyhow!("Internxt endpoint https://x/files returned {status}: {{}}");
+            assert!(is_transient_error(&error), "{status}");
+        }
+        for status in [
+            "400 Bad Request",
+            "401 Unauthorized",
+            "402 Payment Required",
+            "404 Not Found",
+            "409 Conflict",
+        ] {
+            let error = anyhow!("Internxt endpoint https://x/files returned {status}: {{}}");
+            assert!(!is_transient_error(&error), "{status}");
+        }
+        assert!(!is_transient_error(&anyhow!("something else")));
+    }
+}
+
+/// How long this client's own writes override a lagging folder listing.
+const RECENT_WRITE_TTL: Duration = Duration::from_secs(30);
+
+/// Read-your-writes overlay: Internxt's listings lag behind creates and
+/// deletes for a moment (the Python reference client patches its folder
+/// cache the same way).
+#[derive(Default)]
+struct RecentWrites {
+    added: std::collections::HashMap<String, Vec<(NativeItem, Instant)>>,
+    hidden: std::collections::HashMap<String, Instant>,
+}
+
+impl RecentWrites {
+    fn add(&mut self, folder: &str, item: NativeItem, now: Instant) {
+        self.hidden.remove(&item.uuid);
+        let list = self.added.entry(folder.to_owned()).or_default();
+        list.retain(|(existing, _)| existing.uuid != item.uuid);
+        list.push((item, now));
+    }
+
+    fn hide(&mut self, uuid: &str, now: Instant) {
+        for list in self.added.values_mut() {
+            list.retain(|(item, _)| item.uuid != uuid);
+        }
+        self.hidden.insert(uuid.to_owned(), now);
+    }
+
+    fn apply(&mut self, folder: &str, mut items: Vec<NativeItem>, now: Instant) -> Vec<NativeItem> {
+        self.hidden
+            .retain(|_, at| now.duration_since(*at) < RECENT_WRITE_TTL);
+        let hidden = &self.hidden;
+        items.retain(|item| !hidden.contains_key(&item.uuid));
+        if let Some(list) = self.added.get_mut(folder) {
+            list.retain(|(added, at)| {
+                now.duration_since(*at) < RECENT_WRITE_TTL
+                    && !items.iter().any(|item| item.uuid == added.uuid)
+            });
+            items.extend(list.iter().map(|(item, _)| item.clone()));
+        }
+        items
+    }
+}
+
+#[cfg(test)]
+mod recent_write_tests {
+    use super::*;
+
+    fn item(uuid: &str, name: &str) -> NativeItem {
+        NativeItem {
+            name: name.into(),
+            uuid: uuid.into(),
+            is_dir: false,
+            size: 0,
+            modified_at: None,
+        }
+    }
+
+    #[test]
+    fn created_items_show_until_listed() {
+        let now = Instant::now();
+        let mut recent = RecentWrites::default();
+        recent.add("dir", item("n", "new.txt"), now);
+        let listed = recent.apply("dir", vec![item("o", "old.txt")], now);
+        assert_eq!(listed.len(), 2);
+        let listed = recent.apply("dir", vec![item("n", "new.txt")], now);
+        assert_eq!(listed.len(), 1);
+        assert!(recent.apply("dir", vec![], now).is_empty());
+        assert!(recent.apply("other", vec![], now).is_empty());
+    }
+
+    #[test]
+    fn removed_items_are_hidden_everywhere_until_expiry() {
+        let now = Instant::now();
+        let mut recent = RecentWrites::default();
+        recent.add("dir", item("x", "x.txt"), now);
+        recent.hide("x", now);
+        assert!(recent
+            .apply("dir", vec![item("x", "x.txt")], now)
+            .is_empty());
+        let later = now + RECENT_WRITE_TTL + Duration::from_secs(1);
+        assert_eq!(
+            recent.apply("dir", vec![item("x", "x.txt")], later).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn stale_additions_expire() {
+        let now = Instant::now();
+        let mut recent = RecentWrites::default();
+        recent.add("dir", item("n", "ghost"), now);
+        let later = now + RECENT_WRITE_TTL + Duration::from_secs(1);
+        assert!(recent.apply("dir", vec![], later).is_empty());
     }
 }

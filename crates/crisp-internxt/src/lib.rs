@@ -82,7 +82,9 @@ impl HttpConfig {
     /// TCP connect timeout applied to every Internxt client.
     pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
-    fn build_client(&self, timeout: Duration) -> Result<Client> {
+    // Shared policy keeps proxy, TLS defaults, timeouts, HTTP version and
+    // user agent identical for ordinary and receipt-specific clients.
+    fn client_builder(&self, timeout: Duration) -> Result<reqwest::blocking::ClientBuilder> {
         let mut builder = Client::builder()
             .user_agent(HTTP_USER_AGENT)
             .connect_timeout(Self::CONNECT_TIMEOUT)
@@ -98,7 +100,19 @@ impl HttpConfig {
         } else if self.proxy_username.is_some() || self.proxy_password.is_some() {
             anyhow::bail!("Internxt proxy credentials require a proxy URL");
         }
-        Ok(builder.build()?)
+        Ok(builder)
+    }
+
+    fn build_client(&self, timeout: Duration) -> Result<Client> {
+        Ok(self.client_builder(timeout)?.build()?)
+    }
+
+    fn build_one_shot_client(&self, timeout: Duration) -> Result<Client> {
+        Ok(self
+            .client_builder(timeout)?
+            .retry(reqwest::retry::never())
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?)
     }
 }
 
@@ -534,6 +548,7 @@ pub struct InternxtNativeClient {
     base_url: String,
     bearer_token: String,
     http: Client,
+    one_shot_http: Client,
     listing_cache: Arc<Mutex<std::collections::HashMap<String, CachedListing>>>,
     recent_writes: Arc<Mutex<RecentWrites>>,
     verbose: bool,
@@ -854,10 +869,14 @@ impl InternxtNativeClient {
         let http = http_config
             .build_client(transfer_config.request_timeout)
             .context("building Internxt HTTP client")?;
+        let one_shot_http = http_config
+            .build_one_shot_client(transfer_config.request_timeout)
+            .context("building Internxt one-shot HTTP client")?;
         Ok(Self {
             base_url,
             bearer_token: bearer_token.into(),
             http,
+            one_shot_http,
             listing_cache: Arc::new(Mutex::new(std::collections::HashMap::new())),
             recent_writes: Arc::new(Mutex::new(RecentWrites::default())),
             verbose: false,
@@ -3270,6 +3289,81 @@ impl InternxtNativeClient {
                 .body(body.clone())
         })
         .with_context(|| format!("requesting Internxt drive endpoint: {url}"))
+    }
+
+    /// One HTTP send for an object-receipt mutation. Do not wrap this in an
+    /// automatic retry or auth-refresh closure: every failure is uncertain.
+    fn receipt_mutation_once(
+        &self,
+        method: reqwest::Method,
+        url: &str,
+        body: Vec<u8>,
+        uuid: &str,
+    ) -> Result<()> {
+        let response = self
+            .one_shot_http
+            .request(method, url)
+            .bearer_auth(&self.bearer_token)
+            .header("accept", "application/json")
+            .header("internxt-client", "internxt-cli")
+            .header("content-type", "application/json")
+            .body(body)
+            .send();
+        self.clear_listing_cache();
+        // A local read-your-writes overlay cannot prove remote completion.
+        if let Ok(mut recent) = self.recent_writes.lock() {
+            recent.hidden.remove(uuid);
+            for items in recent.added.values_mut() {
+                items.retain(|(item, _)| item.uuid != uuid);
+            }
+        }
+        let response =
+            response.context("one-shot Internxt mutation outcome is uncertain; do not replay")?;
+        anyhow::ensure!(
+            response.status().is_success(),
+            "one-shot Internxt mutation returned HTTP {}; outcome is uncertain; do not replay",
+            response.status()
+        );
+        Ok(())
+    }
+
+    /// Trash exactly this object with one send, no status/protocol retry,
+    /// redirect following or auth refresh. The caller must durably journal the
+    /// identity before calling and reconcile any failure without replay.
+    pub fn trash_once(&self, uuid: &str, kind: &str) -> Result<()> {
+        anyhow::ensure!(
+            !uuid.is_empty() && !matches!(uuid, "." | "..") && matches!(kind, "file" | "folder"),
+            "invalid one-shot trash identity"
+        );
+        let url = format!("{}/storage/trash/add", self.base_url);
+        let body = serde_json::to_vec(&serde_json::json!({"items":[{"uuid":uuid,"type":kind}]}))?;
+        self.receipt_mutation_once(reqwest::Method::POST, &url, body, uuid)
+    }
+
+    /// Restore exactly this object into a recorded folder with one send.
+    /// Failures must be reconciled by identity, never automatically replayed.
+    pub fn restore_from_trash_once(
+        &self,
+        uuid: &str,
+        kind: &str,
+        destination_folder_uuid: &str,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            !uuid.is_empty()
+                && !matches!(uuid, "." | "..")
+                && !destination_folder_uuid.is_empty()
+                && matches!(kind, "files" | "folders"),
+            "invalid one-shot restore identity"
+        );
+        let mut url = reqwest::Url::parse(&format!("{}/", self.base_url))?;
+        url.path_segments_mut()
+            .map_err(|_| anyhow!("invalid one-shot endpoint"))?
+            .pop_if_empty()
+            .push(kind)
+            .push(uuid);
+        let body =
+            serde_json::to_vec(&serde_json::json!({"destinationFolder":destination_folder_uuid}))?;
+        self.receipt_mutation_once(reqwest::Method::PATCH, url.as_str(), body, uuid)
     }
 
     /// List all files and folders directly below [folder_uuid].

@@ -41,6 +41,62 @@ const LISTING_CACHE_TTL: Duration = Duration::from_secs(60 * 60);
 pub const DEFAULT_DRIVE_API_URL: &str = "https://gateway.internxt.com/drive";
 const INTERNXT_NETWORK_URL: &str = "https://gateway.internxt.com/network";
 
+/// Format a gateway error, surfacing the structured `code`/`message` fields
+/// (for example `wrong_2fa`) so callers can map them without parsing bodies.
+fn gateway_error(prefix: &str, status: reqwest::StatusCode, body: &str) -> anyhow::Error {
+    let parsed = serde_json::from_str::<serde_json::Value>(body).ok();
+    let code = parsed
+        .as_ref()
+        .and_then(|value| value.get("code"))
+        .and_then(|value| value.as_str());
+    let message = parsed
+        .as_ref()
+        .and_then(|value| value.get("message"))
+        .and_then(|value| value.as_str());
+    match (code, message) {
+        (Some(code), Some(message)) => anyhow!("{prefix} {status} ({code}): {message}"),
+        (Some(code), None) => anyhow!("{prefix} {status} ({code}): {body}"),
+        _ => anyhow!("{prefix} {status}: {body}"),
+    }
+}
+
+/// HTTP policy for authenticated Internxt requests.
+///
+/// Proxy credentials are in-memory only; callers should load them from a
+/// platform secret store and never persist this configuration as JSON.
+/// `proxy_url` accepts `http://`, `https://` and `socks5://`/`socks5h://`
+/// URLs (SOCKS support depends on reqwest's `socks` feature in the final
+/// binary). The request timeout comes from [`TransferConfig::request_timeout`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HttpConfig {
+    pub proxy_url: Option<String>,
+    pub proxy_username: Option<String>,
+    pub proxy_password: Option<String>,
+}
+
+impl HttpConfig {
+    /// TCP connect timeout applied to every Internxt client.
+    pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
+    fn build_client(&self, timeout: Duration) -> Result<Client> {
+        let mut builder = Client::builder()
+            .connect_timeout(Self::CONNECT_TIMEOUT)
+            .http1_only()
+            .timeout(timeout);
+        if let Some(url) = &self.proxy_url {
+            let mut proxy = reqwest::Proxy::all(url)
+                .with_context(|| format!("invalid Internxt proxy URL: {url}"))?;
+            if let (Some(username), Some(password)) = (&self.proxy_username, &self.proxy_password) {
+                proxy = proxy.basic_auth(username, password);
+            }
+            builder = builder.proxy(proxy);
+        } else if self.proxy_username.is_some() || self.proxy_password.is_some() {
+            anyhow::bail!("Internxt proxy credentials require a proxy URL");
+        }
+        Ok(builder.build()?)
+    }
+}
+
 /// Bounded transfer knobs for the Internxt gateway.
 ///
 /// The default deliberately uses one multipart worker. The gateway is more
@@ -194,6 +250,15 @@ impl InternxtSession {
         hex::encode(Sha256::digest(self.user_id.as_bytes()))
     }
 
+    /// Bearer credential currently preferred by the gateway after refresh.
+    pub fn active_token(&self) -> &str {
+        if self.new_token.is_empty() {
+            &self.token
+        } else {
+            &self.new_token
+        }
+    }
+
     pub fn bucket_bytes(&self) -> Result<[u8; 12]> {
         let bytes = hex::decode(&self.bucket_id).context("decoding Internxt bucket id")?;
         bytes
@@ -333,6 +398,24 @@ pub struct TransferProgress {
 }
 
 pub type ProgressCallback = Arc<dyn Fn(TransferProgress) + Send + Sync>;
+
+/// Adapt a shared [`ProgressCallback`] to the `(completed, total)` byte
+/// callback used by the single-file transfer methods.
+fn byte_progress_adapter(
+    path: &str,
+    callback: ProgressCallback,
+) -> impl FnMut(u64, u64) + 'static {
+    let path = PathBuf::from(path);
+    move |completed_bytes, total_bytes| {
+        callback(TransferProgress {
+            path: path.clone(),
+            completed_bytes,
+            total_bytes,
+            files_completed: u64::from(completed_bytes == total_bytes),
+            folders_completed: 0,
+        })
+    }
+}
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct TransferFilter {
@@ -666,14 +749,28 @@ impl InternxtNativeClient {
         bearer_token: impl Into<String>,
         transfer_config: TransferConfig,
     ) -> Result<Self> {
+        Self::new_with_config_and_http(
+            base_url,
+            bearer_token,
+            transfer_config,
+            &HttpConfig::default(),
+        )
+    }
+
+    /// Construct a client with transfer settings and an explicit
+    /// HTTP/SOCKS5 proxy policy.
+    pub fn new_with_config_and_http(
+        base_url: impl Into<String>,
+        bearer_token: impl Into<String>,
+        transfer_config: TransferConfig,
+        http_config: &HttpConfig,
+    ) -> Result<Self> {
         transfer_config.validate()?;
         let base_url = base_url.into().trim_end_matches('/').to_owned();
         reqwest::Url::parse(&base_url)
             .with_context(|| format!("invalid Internxt URL: {base_url}"))?;
-        let http = Client::builder()
-            .connect_timeout(Duration::from_secs(30))
-            .timeout(transfer_config.request_timeout)
-            .build()
+        let http = http_config
+            .build_client(transfer_config.request_timeout)
             .context("building Internxt HTTP client")?;
         Ok(Self {
             base_url,
@@ -764,7 +861,10 @@ impl InternxtNativeClient {
         password: &str,
         tfa_code: Option<&str>,
     ) -> Result<InternxtSession> {
-        let http = Client::new();
+        let http = Client::builder()
+            .http1_only()
+            .build()
+            .context("building Internxt login HTTP client")?;
         let drive_api_url = drive_api_url.trim_end_matches('/');
         let email = email.trim().to_lowercase();
         let security_url = format!("{drive_api_url}/auth/login");
@@ -780,8 +880,10 @@ impl InternxtNativeClient {
             .text()
             .context("reading Internxt login security details")?;
         if !security_status.is_success() {
-            return Err(anyhow!(
-                "Internxt login security returned {security_status}: {security_body}"
+            return Err(gateway_error(
+                "Internxt login security returned",
+                security_status,
+                &security_body,
             ));
         }
         let encrypted_salt = serde_json::from_str::<serde_json::Value>(&security_body)?
@@ -807,8 +909,10 @@ impl InternxtNativeClient {
         let access_status = access.status();
         let access_body = access.text().context("reading Internxt login access")?;
         if !access_status.is_success() {
-            return Err(anyhow!(
-                "Internxt login access returned {access_status}: {access_body}"
+            return Err(gateway_error(
+                "Internxt login access returned",
+                access_status,
+                &access_body,
             ));
         }
         let access_json: serde_json::Value = serde_json::from_str(&access_body)?;
@@ -828,8 +932,10 @@ impl InternxtNativeClient {
         let refresh_status = refresh.status();
         let refresh_body = refresh.text().context("reading Internxt login hydration")?;
         if !refresh_status.is_success() {
-            return Err(anyhow!(
-                "Internxt login hydration returned {refresh_status}: {refresh_body}"
+            return Err(gateway_error(
+                "Internxt login hydration returned",
+                refresh_status,
+                &refresh_body,
             ));
         }
         let hydrated: serde_json::Value = serde_json::from_str(&refresh_body)?;
@@ -873,11 +979,7 @@ impl InternxtNativeClient {
     /// replaces the bearer tokens returned by `/users/refresh`.
     pub fn refresh_session(&self, session: &InternxtSession) -> Result<InternxtSession> {
         let url = format!("{}/users/refresh", self.base_url);
-        let token = if session.new_token.is_empty() {
-            &session.token
-        } else {
-            &session.new_token
-        };
+        let token = session.active_token();
         let response = self
             .http
             .get(&url)
@@ -1522,6 +1624,32 @@ impl InternxtNativeClient {
         Ok(hex::encode(hashing.hash.finalize()))
     }
 
+    /// [`Self::upload_reader_with_progress`] for callers holding a shared
+    /// [`ProgressCallback`] (the CrispSorter-style API). Each report carries
+    /// `plain_name` as its path and the plaintext byte counts; the returned
+    /// string is the plaintext SHA-256.
+    #[allow(clippy::too_many_arguments)]
+    pub fn upload_reader_with_progress_callback<R: Read>(
+        &self,
+        session: &InternxtSession,
+        parent_folder_uuid: &str,
+        plain_name: &str,
+        file_type: &str,
+        reader: R,
+        file_size: u64,
+        progress: ProgressCallback,
+    ) -> Result<String> {
+        self.upload_reader_with_progress(
+            session,
+            parent_folder_uuid,
+            plain_name,
+            file_type,
+            reader,
+            file_size,
+            byte_progress_adapter(plain_name, progress),
+        )
+    }
+
     /// Reader upload with plaintext byte progress. The returned SHA-256 is
     /// computed from plaintext bytes before encryption and can be persisted
     /// by callers as an end-to-end content verification value.
@@ -2146,6 +2274,24 @@ impl InternxtNativeClient {
         Ok(total)
     }
 
+    /// [`Self::download_file_to_writer_with_progress`] for callers holding a
+    /// shared [`ProgressCallback`] (the CrispSorter-style API). Each report
+    /// carries `file_uuid` as its path.
+    pub fn download_file_to_writer_with_progress_callback<W: Write>(
+        &self,
+        session: &InternxtSession,
+        file_uuid: &str,
+        writer: W,
+        progress: ProgressCallback,
+    ) -> Result<u64> {
+        self.download_file_to_writer_with_progress(
+            session,
+            file_uuid,
+            writer,
+            byte_progress_adapter(file_uuid, progress),
+        )
+    }
+
     /// Stream-decrypt while computing the plaintext SHA-256 digest.
     pub fn download_file_to_writer_verified<W: Write>(
         &self,
@@ -2506,6 +2652,7 @@ impl InternxtNativeClient {
     ) -> Result<Response> {
         let mut last_error = None;
         for attempt in 0..self.transfer_config.max_upload_retries {
+            let started = Instant::now();
             match self
                 .http
                 .put(url)
@@ -2513,7 +2660,16 @@ impl InternxtNativeClient {
                 .body(body.clone())
                 .send()
             {
-                Ok(response) if response.status().is_success() => return Ok(response),
+                Ok(response) if response.status().is_success() => {
+                    if self.verbose {
+                        eprintln!(
+                            "[verbose] PUT part {part}/{total} attempt {} completed in {:.3}s",
+                            attempt + 1,
+                            started.elapsed().as_secs_f64()
+                        );
+                    }
+                    return Ok(response);
+                }
                 Ok(response) if response.status().as_u16() == 403 => {
                     return Err(anyhow!(
                         "Internxt part {part}/{total} upload URL expired (HTTP 403)"
@@ -2525,7 +2681,16 @@ impl InternxtNativeClient {
                         response.status()
                     ));
                 }
-                Err(error) => last_error = Some(error.into()),
+                Err(error) => {
+                    if self.verbose {
+                        eprintln!(
+                            "[verbose] PUT part {part}/{total} attempt {} failed after {:.3}s: {error}",
+                            attempt + 1,
+                            started.elapsed().as_secs_f64()
+                        );
+                    }
+                    last_error = Some(error.into());
+                }
             }
             if attempt + 1 < self.transfer_config.max_upload_retries {
                 std::thread::sleep(Duration::from_millis(
@@ -3449,6 +3614,26 @@ fn is_expired_token_error(error: &anyhow::Error) -> bool {
         || text.contains("token expired")
 }
 
+/// Return the lowercase SHA-256 digest commonly used by callers to verify
+/// plaintext before or after a transfer.
+pub fn sha256_hex(data: &[u8]) -> String {
+    hex::encode(Sha256::digest(data))
+}
+
+/// Verify a plaintext SHA-256 digest (case-insensitive, surrounding
+/// whitespace ignored) and return a descriptive error on a mismatch.
+/// Provider shard hashes remain an internal wire concern.
+pub fn verify_sha256(data: &[u8], expected_hex: &str) -> Result<()> {
+    let actual = sha256_hex(data);
+    anyhow::ensure!(
+        actual.eq_ignore_ascii_case(expected_hex.trim()),
+        "Internxt content hash mismatch: expected {}, got {}",
+        expected_hex.trim(),
+        actual
+    );
+    Ok(())
+}
+
 fn item_name(item: &serde_json::Value, kind: &str) -> String {
     let plain_name = item
         .get("plainName")
@@ -3474,6 +3659,314 @@ mod tests {
         0xff, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd,
         0xee, 0xff,
     ];
+
+    fn test_nonce() -> u128 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    }
+
+    fn empty_session() -> InternxtSession {
+        InternxtSession {
+            drive_api_url: String::new(),
+            network_url: String::new(),
+            email: String::new(),
+            token: String::new(),
+            new_token: String::new(),
+            mnemonic: String::new(),
+            user_id: String::new(),
+            root_folder_id: String::new(),
+            bridge_user: String::new(),
+            bucket_id: String::new(),
+        }
+    }
+
+    /// One-shot HTTP server that records raw requests and answers each with
+    /// the next canned response; `delay` postpones every answer.
+    fn spawn_capture_server(
+        responses: Vec<(u16, String)>,
+        delay: Duration,
+    ) -> (String, Arc<Mutex<Vec<String>>>) {
+        use std::io::{Read as _, Write as _};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = format!("http://{}", listener.local_addr().unwrap());
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&requests);
+        std::thread::spawn(move || {
+            for (status, body) in responses {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    return;
+                };
+                let mut request = [0u8; 8192];
+                let size = stream.read(&mut request).unwrap_or(0);
+                captured
+                    .lock()
+                    .unwrap()
+                    .push(String::from_utf8_lossy(&request[..size]).into_owned());
+                std::thread::sleep(delay);
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+            }
+        });
+        (address, requests)
+    }
+
+    #[test]
+    fn http_config_rejects_invalid_proxy_before_requests() {
+        let config = HttpConfig {
+            proxy_url: Some("not a proxy URL".into()),
+            ..Default::default()
+        };
+        let error = InternxtNativeClient::new_with_config_and_http(
+            "http://127.0.0.1:1",
+            "token",
+            TransferConfig::default(),
+            &config,
+        )
+        .err()
+        .unwrap();
+        assert!(format!("{error:#}").contains("invalid Internxt proxy URL"));
+    }
+
+    #[test]
+    fn http_config_requires_proxy_url_for_credentials() {
+        for config in [
+            HttpConfig {
+                proxy_password: Some("secret".into()),
+                ..Default::default()
+            },
+            HttpConfig {
+                proxy_username: Some("user".into()),
+                ..Default::default()
+            },
+        ] {
+            let error = InternxtNativeClient::new_with_config_and_http(
+                "http://127.0.0.1:1",
+                "token",
+                TransferConfig::default(),
+                &config,
+            )
+            .err()
+            .unwrap();
+            let text = format!("{error:#}");
+            assert!(text.contains("require a proxy URL"), "{text}");
+            assert!(!text.contains("secret"));
+        }
+    }
+
+    #[test]
+    fn http_config_still_validates_transfer_config_and_url() {
+        let invalid = TransferConfig {
+            part_size: 15,
+            ..TransferConfig::default()
+        };
+        assert!(InternxtNativeClient::new_with_config_and_http(
+            "http://127.0.0.1:1",
+            "token",
+            invalid,
+            &HttpConfig::default(),
+        )
+        .is_err());
+        assert!(InternxtNativeClient::new_with_config_and_http(
+            "not a url",
+            "token",
+            TransferConfig::default(),
+            &HttpConfig::default(),
+        )
+        .is_err());
+        InternxtNativeClient::new_with_config_and_http(
+            "http://127.0.0.1:1/",
+            "token",
+            TransferConfig::default(),
+            &HttpConfig::default(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn http_config_routes_requests_through_authenticated_proxy() {
+        let (proxy, requests) =
+            spawn_capture_server(vec![(200, r#"{"size":"1"}"#.into())], Duration::ZERO);
+        let config = HttpConfig {
+            proxy_url: Some(proxy),
+            proxy_username: Some("proxy-user".into()),
+            proxy_password: Some("proxy-pass".into()),
+        };
+        let client = InternxtNativeClient::new_with_config_and_http(
+            "http://internxt-gateway.invalid/drive",
+            "bearer",
+            TransferConfig::default(),
+            &config,
+        )
+        .unwrap();
+        let metadata = client.file_metadata("file-uuid").unwrap();
+        assert_eq!(metadata["size"], "1");
+        let request = requests.lock().unwrap().join("\n");
+        assert!(
+            request.starts_with("GET http://internxt-gateway.invalid/drive/files/file-uuid/meta "),
+            "request was not sent in proxy absolute-form: {}",
+            request.lines().next().unwrap_or_default()
+        );
+        let expected = base64_basic("proxy-user:proxy-pass");
+        assert!(request
+            .to_ascii_lowercase()
+            .contains(&format!("proxy-authorization: basic {}", expected.to_ascii_lowercase())));
+    }
+
+    fn base64_basic(value: &str) -> String {
+        const TABLE: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let bytes = value.as_bytes();
+        let mut out = String::new();
+        for chunk in bytes.chunks(3) {
+            let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+            let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+            for i in 0..4 {
+                if i <= chunk.len() {
+                    out.push(TABLE[((n >> (18 - 6 * i)) & 63) as usize] as char);
+                } else {
+                    out.push('=');
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn transfer_request_timeout_is_applied_through_http_config() {
+        let (gateway, _) =
+            spawn_capture_server(vec![(200, "{}".into())], Duration::from_millis(1500));
+        let client = InternxtNativeClient::new_with_config_and_http(
+            gateway,
+            "bearer",
+            TransferConfig {
+                request_timeout: Duration::from_millis(200),
+                ..TransferConfig::default()
+            },
+            &HttpConfig::default(),
+        )
+        .unwrap();
+        let started = Instant::now();
+        assert!(client.file_metadata("slow").is_err());
+        assert!(started.elapsed() < Duration::from_millis(1400));
+    }
+
+    #[test]
+    fn active_token_prefers_refreshed_credential() {
+        let mut session = InternxtSession {
+            token: "old-token".into(),
+            new_token: "refreshed-token".into(),
+            ..empty_session()
+        };
+        assert_eq!(session.active_token(), "refreshed-token");
+        session.new_token.clear();
+        assert_eq!(session.active_token(), "old-token");
+    }
+
+    #[test]
+    fn refresh_session_authenticates_with_active_token() {
+        let (gateway, requests) = spawn_capture_server(
+            vec![(200, r#"{"token":"t2","newToken":"n2"}"#.into())],
+            Duration::ZERO,
+        );
+        let client = InternxtNativeClient::new(&gateway, "unused").unwrap();
+        let session = InternxtSession {
+            drive_api_url: gateway.clone(),
+            token: "old-token".into(),
+            new_token: "refreshed-token".into(),
+            ..empty_session()
+        };
+        let _ = client.refresh_session(&session);
+        let request = requests.lock().unwrap().join("\n").to_ascii_lowercase();
+        assert!(request.starts_with("get /users/refresh "));
+        assert!(request.contains("authorization: bearer refreshed-token"));
+    }
+
+    #[test]
+    fn plaintext_hash_helpers_match_known_vectors() {
+        assert_eq!(
+            sha256_hex(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        verify_sha256(
+            b"abc",
+            " BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD\n",
+        )
+        .unwrap();
+        let error = verify_sha256(b"tampered", &sha256_hex(b"abc"))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("content hash mismatch"));
+        assert!(verify_sha256(b"abc", "").is_err());
+    }
+
+    #[test]
+    fn progress_adapter_maps_bytes_to_transfer_progress() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let copy = Arc::clone(&seen);
+        let callback: ProgressCallback = Arc::new(move |progress| {
+            copy.lock().unwrap().push(progress);
+        });
+        let mut adapter = byte_progress_adapter("upload.bin", callback);
+        adapter(4, 12);
+        adapter(12, 12);
+        let progress = seen.lock().unwrap();
+        assert_eq!(progress.len(), 2);
+        assert_eq!(progress[0].path, PathBuf::from("upload.bin"));
+        assert_eq!(progress[0].completed_bytes, 4);
+        assert_eq!(progress[0].files_completed, 0);
+        assert_eq!(progress[1].completed_bytes, 12);
+        assert_eq!(progress[1].total_bytes, 12);
+        assert_eq!(progress[1].files_completed, 1);
+    }
+
+    #[test]
+    fn gateway_error_preserves_tfa_code_and_message_without_secrets() {
+        let error = gateway_error(
+            "Internxt login access returned",
+            reqwest::StatusCode::UNAUTHORIZED,
+            r#"{"code":"wrong_2fa","message":"Invalid code"}"#,
+        )
+        .to_string();
+        assert!(error.contains("wrong_2fa"));
+        assert!(error.contains("Invalid code"));
+        assert!(error.contains("401"));
+        let code_only = gateway_error(
+            "prefix",
+            reqwest::StatusCode::BAD_REQUEST,
+            r#"{"code":"x"}"#,
+        )
+        .to_string();
+        assert!(code_only.contains("(x)"));
+        let plain = gateway_error("prefix", reqwest::StatusCode::BAD_GATEWAY, "oops").to_string();
+        assert_eq!(plain, "prefix 502 Bad Gateway: oops");
+    }
+
+    #[test]
+    fn login_surfaces_structured_gateway_errors() {
+        let (gateway, _) = spawn_capture_server(
+            vec![(
+                403,
+                r#"{"code":"account_locked","message":"Too many attempts"}"#.into(),
+            )],
+            Duration::ZERO,
+        );
+        let error = InternxtNativeClient::login_without_keys(&gateway, "a@b.c", "pw", None)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("account_locked"), "{error}");
+        assert!(error.contains("Too many attempts"), "{error}");
+        assert!(!error.contains("pw\""));
+    }
 
     #[test]
     fn password_hash_matches_reference_vector() {
@@ -3797,7 +4290,7 @@ mod tests {
     fn download_checkpoint_round_trips_completed_parts() {
         let path = std::env::temp_dir().join(format!(
             "crispsorter-download-checkpoint-test-{}.json",
-            now_seconds()
+            test_nonce()
         ));
         let value = DownloadResumeState {
             version: 1,

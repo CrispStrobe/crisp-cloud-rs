@@ -70,6 +70,40 @@ pub struct TransferConfig {
     pub retry_backoff_ms: u64,
 }
 
+/// HTTP policy for authenticated Filen requests.
+///
+/// Proxy credentials are supplied only in memory; callers should obtain them
+/// from their platform secret store rather than serializing this config.
+/// `proxy_url` accepts `http://`, `https://` and `socks5://`/`socks5h://`
+/// URLs (SOCKS support depends on reqwest's `socks` feature in the final
+/// binary).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct HttpConfig {
+    pub proxy_url: Option<String>,
+    pub proxy_username: Option<String>,
+    pub proxy_password: Option<String>,
+}
+
+impl HttpConfig {
+    /// Default per-request timeout for authenticated Filen requests.
+    pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+    fn build_client(&self) -> Result<reqwest::blocking::Client> {
+        let mut builder = reqwest::blocking::Client::builder().timeout(Self::REQUEST_TIMEOUT);
+        if let Some(url) = &self.proxy_url {
+            let mut proxy = reqwest::Proxy::all(url)
+                .with_context(|| format!("invalid Filen proxy URL: {url}"))?;
+            if let (Some(username), Some(password)) = (&self.proxy_username, &self.proxy_password) {
+                proxy = proxy.basic_auth(username, password);
+            }
+            builder = builder.proxy(proxy);
+        } else if self.proxy_username.is_some() || self.proxy_password.is_some() {
+            anyhow::bail!("Filen proxy credentials require a proxy URL");
+        }
+        Ok(builder.build()?)
+    }
+}
+
 impl Default for TransferConfig {
     fn default() -> Self {
         Self {
@@ -543,10 +577,15 @@ struct RemoteFolder {
 
 impl FilenNativeClient {
     fn new_inner(session: &FilenSession) -> Result<Self> {
+        Self::new_inner_with_http_config(session, &HttpConfig::default())
+    }
+
+    fn new_inner_with_http_config(
+        session: &FilenSession,
+        http_config: &HttpConfig,
+    ) -> Result<Self> {
         Ok(Self {
-            http: reqwest::blocking::Client::builder()
-                .timeout(Duration::from_secs(30))
-                .build()?,
+            http: http_config.build_client()?,
             gateway_url: session.gateway_url.trim_end_matches('/').into(),
             ingest_url: session.ingest_url.trim_end_matches('/').into(),
             egest_url: session.egest_url.trim_end_matches('/').into(),
@@ -567,6 +606,26 @@ impl FilenNativeClient {
 
     pub fn from_session(session: &FilenSession) -> Result<Self> {
         Self::new_inner(session)
+    }
+
+    /// Construct a session client with an explicit HTTP/SOCKS5 proxy policy.
+    pub fn from_session_with_http_config(
+        session: &FilenSession,
+        http_config: &HttpConfig,
+    ) -> Result<Self> {
+        Self::new_inner_with_http_config(session, http_config)
+    }
+
+    /// Construct a session client with both transfer tuning and an explicit
+    /// HTTP/SOCKS5 proxy policy.
+    pub fn from_session_with_configs(
+        session: &FilenSession,
+        transfer_config: TransferConfig,
+        http_config: &HttpConfig,
+    ) -> Result<Self> {
+        let mut client = Self::new_inner_with_http_config(session, http_config)?;
+        client.transfer_config = transfer_config.validate()?;
+        Ok(client)
     }
 
     /// Validate the long-lived Filen API-key session.
@@ -2015,6 +2074,26 @@ impl FilenNativeClient {
         self.list_folder("trash")
     }
 
+    /// List recoverable trash entries with an optional kind filter and a
+    /// caller-supplied maximum. `kind` accepts `file` or `folder`; `None`
+    /// returns both kinds. A zero limit returns no entries.
+    pub fn list_trash_filtered(&self, kind: Option<&str>, limit: usize) -> Result<Vec<NativeItem>> {
+        filter_trash_items(self.list_trash()?, kind, limit)
+    }
+
+    /// Permanently delete every currently listed trash entry, sequentially.
+    /// Returns the number of entries removed. This is destructive and
+    /// intentionally does not re-list, so an item trashed concurrently is
+    /// left untouched for a later invocation.
+    pub fn empty_trash(&self) -> Result<usize> {
+        let items = self.list_trash_filtered(None, usize::MAX)?;
+        let count = items.len();
+        for item in items {
+            self.delete_permanent(&item.uuid, item.is_dir)?;
+        }
+        Ok(count)
+    }
+
     pub fn upload_file(&self, parent: &str, name: &str, mime: &str, data: &[u8]) -> Result<()> {
         let (key, key_string) = self.new_file_key()?;
         let mut hasher = blake3::Hasher::new();
@@ -2977,6 +3056,26 @@ impl FilenNativeClient {
     }
 }
 
+fn filter_trash_items(
+    items: Vec<NativeItem>,
+    kind: Option<&str>,
+    limit: usize,
+) -> Result<Vec<NativeItem>> {
+    anyhow::ensure!(
+        kind.is_none_or(|value| value == "file" || value == "folder"),
+        "invalid trash kind {kind:?}; expected file or folder"
+    );
+    Ok(items
+        .into_iter()
+        .filter(|item| match kind {
+            Some("file") => !item.is_dir,
+            Some("folder") => item.is_dir,
+            _ => true,
+        })
+        .take(limit)
+        .collect())
+}
+
 #[derive(Debug, Deserialize)]
 struct UploadedChunk {
     bucket: String,
@@ -3159,6 +3258,241 @@ mod tests {
         let client = FilenNativeClient::from_session(&invalid).unwrap();
         let error = client.refresh_session().unwrap_err().to_string();
         assert!(error.contains("login again"));
+    }
+
+    fn spawn_capture_server(responses: Vec<String>) -> (String, Arc<Mutex<Vec<String>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = format!("http://{}", listener.local_addr().unwrap());
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&requests);
+        thread::spawn(move || {
+            for body in responses {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0u8; 8192];
+                let size = stream.read(&mut request).unwrap_or(0);
+                captured
+                    .lock()
+                    .unwrap()
+                    .push(String::from_utf8_lossy(&request[..size]).into_owned());
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                )
+                .unwrap();
+            }
+        });
+        (address, requests)
+    }
+
+    fn trash_listing_body(folders: &[(&str, &str)]) -> String {
+        let key = b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let folders = folders
+            .iter()
+            .map(|(uuid, name)| {
+                let metadata = v2_encrypt_metadata(
+                    &format!(r#"{{"name":"{name}","creation":1}}"#),
+                    key,
+                    *b"abcdefghijkl",
+                )
+                .unwrap();
+                format!(r#"{{"uuid":"{uuid}","name":"{metadata}","parent":"trash"}}"#)
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(r#"{{"status":true,"data":{{"folders":[{folders}],"uploads":[]}}}}"#)
+    }
+
+    #[test]
+    fn http_config_rejects_invalid_proxy_before_requests() {
+        let session = test_session("http://127.0.0.1:1".into());
+        let config = HttpConfig {
+            proxy_url: Some("not a proxy URL".into()),
+            ..Default::default()
+        };
+        let error = FilenNativeClient::from_session_with_http_config(&session, &config)
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("invalid Filen proxy URL"));
+        assert!(FilenNativeClient::from_session_with_configs(
+            &session,
+            TransferConfig::default(),
+            &config
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn http_config_requires_proxy_url_for_credentials() {
+        let session = test_session("http://127.0.0.1:1".into());
+        for config in [
+            HttpConfig {
+                proxy_password: Some("secret".into()),
+                ..Default::default()
+            },
+            HttpConfig {
+                proxy_username: Some("user".into()),
+                ..Default::default()
+            },
+        ] {
+            let error = FilenNativeClient::from_session_with_http_config(&session, &config)
+                .err()
+                .unwrap()
+                .to_string();
+            assert!(error.contains("require a proxy URL"), "{error}");
+            assert!(!error.contains("secret"));
+        }
+    }
+
+    #[test]
+    fn http_config_default_matches_plain_constructor() {
+        assert_eq!(HttpConfig::default().proxy_url, None);
+        assert_eq!(HttpConfig::REQUEST_TIMEOUT, Duration::from_secs(30));
+        let session = test_session("http://127.0.0.1:1".into());
+        FilenNativeClient::from_session_with_http_config(&session, &HttpConfig::default())
+            .unwrap();
+        FilenNativeClient::from_session_with_configs(
+            &session,
+            TransferConfig::default(),
+            &HttpConfig::default(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn http_config_routes_requests_through_authenticated_proxy() {
+        let (proxy, requests) = spawn_capture_server(vec![trash_listing_body(&[])]);
+        let config = HttpConfig {
+            proxy_url: Some(proxy),
+            proxy_username: Some("proxy-user".into()),
+            proxy_password: Some("proxy-pass".into()),
+        };
+        let client = FilenNativeClient::from_session_with_http_config(
+            &test_session("http://filen-gateway.invalid".into()),
+            &config,
+        )
+        .unwrap();
+        assert!(client.list_trash().unwrap().is_empty());
+        let request = requests.lock().unwrap().join("\n");
+        let first_line = request.lines().next().unwrap_or_default();
+        assert!(
+            first_line.contains("http://filen-gateway.invalid/"),
+            "request was not sent in proxy absolute-form: {first_line}"
+        );
+        let expected = base64::engine::general_purpose::STANDARD.encode("proxy-user:proxy-pass");
+        assert!(
+            request
+                .to_ascii_lowercase()
+                .contains(&format!("proxy-authorization: basic {}", expected.to_ascii_lowercase())),
+            "missing proxy credentials"
+        );
+    }
+
+    #[test]
+    fn list_trash_filtered_applies_kind_and_limit_over_http() {
+        let (gateway, _) = spawn_capture_server(vec![
+            trash_listing_body(&[("folder-a", "a"), ("folder-b", "b")]),
+            trash_listing_body(&[("folder-a", "a"), ("folder-b", "b")]),
+            trash_listing_body(&[("folder-a", "a")]),
+        ]);
+        let mut client = FilenNativeClient::from_session(&test_session(gateway)).unwrap();
+        client.set_listing_cache_ttl(Duration::ZERO);
+        assert_eq!(client.list_trash_filtered(Some("folder"), 1).unwrap().len(), 1);
+        assert!(client.list_trash_filtered(Some("file"), 10).unwrap().is_empty());
+        assert!(client.list_trash_filtered(None, 0).unwrap().is_empty());
+        assert!(client.list_trash_filtered(Some("bogus"), 10).is_err());
+    }
+
+    #[test]
+    fn login_sends_reference_compatible_2fa_values() {
+        let login_responses = || {
+            vec![
+                r#"{"status":true,"data":{"authVersion":2,"salt":"salt"}}"#.to_string(),
+                r#"{"status":false,"code":"wrong_2fa","message":"Invalid code"}"#.to_string(),
+            ]
+        };
+        let (gateway, requests) = spawn_capture_server(login_responses());
+        let _ =
+            FilenNativeClient::login(&gateway, "test@example.test", "password", None).unwrap_err();
+        let body = requests.lock().unwrap().join("\n");
+        assert!(
+            body.contains(r#""twoFactorCode":"XXXXXX""#),
+            "missing disabled-2FA sentinel in login request"
+        );
+
+        let (gateway, requests) = spawn_capture_server(login_responses());
+        let _ = FilenNativeClient::login(&gateway, "test@example.test", "password", Some("123456"))
+            .unwrap_err();
+        let body = requests.lock().unwrap().join("\n");
+        assert!(
+            body.contains(r#""twoFactorCode":"123456""#),
+            "missing supplied 2FA code in login request"
+        );
+    }
+
+    #[test]
+    fn trash_filters_validate_kind_and_apply_limit() {
+        let item = |uuid: &str, is_dir: bool| NativeItem {
+            uuid: uuid.into(),
+            name: uuid.into(),
+            is_dir,
+            size: 0,
+            parent: "trash".into(),
+            file_key: None,
+            bucket: String::new(),
+            region: String::new(),
+            chunks: 0,
+            version: 3,
+            mime: String::new(),
+            created: 0,
+            modified: 0,
+            hash: String::new(),
+        };
+        let items = vec![
+            item("file-1", false),
+            item("folder-1", true),
+            item("file-2", false),
+        ];
+        assert_eq!(
+            filter_trash_items(items.clone(), Some("file"), 1)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            filter_trash_items(items.clone(), Some("folder"), usize::MAX)
+                .unwrap()
+                .iter()
+                .map(|entry| entry.uuid.as_str())
+                .collect::<Vec<_>>(),
+            vec!["folder-1"]
+        );
+        assert_eq!(filter_trash_items(items.clone(), None, 10).unwrap().len(), 3);
+        assert!(filter_trash_items(items.clone(), None, 0).unwrap().is_empty());
+        assert!(filter_trash_items(items, Some("other"), 10).is_err());
+    }
+
+    #[test]
+    fn empty_trash_lists_and_permanently_deletes_entries() {
+        let (gateway, requests) = spawn_capture_server(vec![
+            trash_listing_body(&[("trashed-folder", "old-folder")]),
+            r#"{"status":true,"data":null}"#.into(),
+        ]);
+        let client = FilenNativeClient::from_session(&test_session(gateway)).unwrap();
+        assert_eq!(client.empty_trash().unwrap(), 1);
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests[1].starts_with("POST /v3/dir/delete/permanent "));
+        assert!(requests[1].contains("trashed-folder"));
+    }
+
+    #[test]
+    fn empty_trash_on_empty_trash_deletes_nothing() {
+        let (gateway, requests) = spawn_capture_server(vec![trash_listing_body(&[])]);
+        let client = FilenNativeClient::from_session(&test_session(gateway)).unwrap();
+        assert_eq!(client.empty_trash().unwrap(), 0);
+        assert_eq!(requests.lock().unwrap().len(), 1);
     }
 
     fn spawn_http_server(responses: Vec<String>) -> String {

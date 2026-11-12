@@ -118,6 +118,12 @@ enum Command {
         #[arg(long, default_value_t = 50)]
         limit: usize,
     },
+    EmptyTrash {
+        session: PathBuf,
+        /// Required because this permanently deletes every trash entry.
+        #[arg(long)]
+        force: bool,
+    },
     Mkdir {
         session: PathBuf,
         remote: PathBuf,
@@ -386,27 +392,26 @@ fn run() -> Result<()> {
             limit,
         } => {
             let (client, _) = open(&session)?;
-            for entry in client
-                .list_trash()?
-                .into_iter()
-                .filter(|item| {
-                    kind.as_deref().is_none_or(|value| {
-                        (value == "folder" && item.is_dir) || (value == "file" && !item.is_dir)
-                    })
-                })
-                .take(limit)
-            {
+            for entry in client.list_trash_filtered(kind.as_deref(), limit)? {
                 print_item(&entry);
             }
+        }
+        Command::EmptyTrash { session, force } => {
+            anyhow::ensure!(force, "emptying trash requires --force");
+            let (client, _) = open(&session)?;
+            let count = client.empty_trash()?;
+            println!("permanently deleted {count} trash entries");
         }
         Command::Mkdir { session, remote } => {
             let (client, value) = open(&session)?;
             let mut parent = value.root_folder_uuid.clone();
             for component in remote.components() {
-                let name = component.as_os_str().to_string_lossy();
-                if name.is_empty() || name == "." || name == "/" {
+                // Only normal segments name folders: the root is `/` on Unix but
+                // `\` (plus a drive prefix) on Windows.
+                let std::path::Component::Normal(name) = component else {
                     continue;
-                }
+                };
+                let name = name.to_string_lossy();
                 parent = client.create_folder(&parent, &name)?;
             }
         }

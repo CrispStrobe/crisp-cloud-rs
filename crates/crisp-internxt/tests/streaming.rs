@@ -1,4 +1,7 @@
-use crisp_internxt::{crypt, InternxtNativeClient, InternxtSession};
+use crisp_internxt::{
+    crypt, sha256_hex, verify_sha256, InternxtNativeClient, InternxtSession, ProgressCallback,
+    TransferProgress,
+};
 use serde_json::Value;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -342,6 +345,160 @@ fn interrupted_multipart_upload_reuses_checkpoint_and_skips_completed_parts() {
     assert_eq!(attempts.lock().unwrap()[3], 6);
     assert!(client.load_upload_resume_state(&state).unwrap().is_none());
     std::fs::remove_file(path).unwrap();
+}
+
+/// Serve a small, generic upload/download protocol until the test process
+/// exits; used by the ProgressCallback compatibility tests.
+fn spawn_generic_transfer_server(
+    bucket: String,
+    index: [u8; 32],
+    ciphertext: Vec<u8>,
+    plaintext_len: usize,
+) -> (std::net::SocketAddr, Arc<Mutex<Vec<u8>>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let uploaded = Arc::new(Mutex::new(Vec::new()));
+    let uploaded_copy = Arc::clone(&uploaded);
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { break };
+            let (request, _headers, body) = read_request(&mut stream);
+            let path = request.split_whitespace().nth(1).unwrap().to_owned();
+            match path.as_str() {
+                p if p.contains("/files/start") => respond(
+                    &mut stream,
+                    "200 OK",
+                    &format!(r#"{{"uploads":[{{"uuid":"shard","url":"http://{address}/part"}}]}}"#),
+                ),
+                "/part" => {
+                    *uploaded_copy.lock().unwrap() = body;
+                    respond(&mut stream, "200 OK", "");
+                }
+                p if p.ends_with("/files/finish") => {
+                    respond(&mut stream, "200 OK", r#"{"id":"network-file"}"#)
+                }
+                "/files/file/meta" => respond(
+                    &mut stream,
+                    "200 OK",
+                    &format!(r#"{{"bucket":"{bucket}","fileId":"net","size":"{plaintext_len}"}}"#),
+                ),
+                p if p.ends_with("/files/net/info") => respond(
+                    &mut stream,
+                    "200 OK",
+                    &format!(
+                        r#"{{"shards":[{{"url":"http://{address}/object"}}],"index":"{}"}}"#,
+                        hex::encode(index)
+                    ),
+                ),
+                "/object" => respond_bytes(
+                    &mut stream,
+                    "200 OK",
+                    "application/octet-stream",
+                    &ciphertext,
+                ),
+                _ => respond(&mut stream, "200 OK", "{}"),
+            }
+        }
+    });
+    (address, uploaded)
+}
+
+fn recording_callback() -> (ProgressCallback, Arc<Mutex<Vec<TransferProgress>>>) {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let copy = Arc::clone(&seen);
+    let callback: ProgressCallback = Arc::new(move |progress| copy.lock().unwrap().push(progress));
+    (callback, seen)
+}
+
+fn generic_session(address: std::net::SocketAddr, bucket: &str) -> InternxtSession {
+    InternxtSession {
+        drive_api_url: format!("http://{address}"),
+        network_url: format!("http://{address}"),
+        email: "test@example.invalid".to_owned(),
+        token: "token".to_owned(),
+        new_token: "new-token".to_owned(),
+        mnemonic: "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".to_owned(),
+        user_id: "user".to_owned(),
+        root_folder_id: "root".to_owned(),
+        bridge_user: "bridge".to_owned(),
+        bucket_id: bucket.to_owned(),
+    }
+}
+
+#[test]
+fn upload_reader_progress_callback_reports_bytes_and_returns_plaintext_sha256() {
+    let bucket = "00".repeat(12);
+    let plaintext = b"sorter-style progress callback upload".to_vec();
+    let (address, uploaded) = spawn_generic_transfer_server(bucket.clone(), [0; 32], Vec::new(), 0);
+    let session = generic_session(address, &bucket);
+    let client = InternxtNativeClient::new(&session.drive_api_url, session.active_token()).unwrap();
+    let (callback, seen) = recording_callback();
+    let digest = client
+        .upload_reader_with_progress_callback(
+            &session,
+            "folder",
+            "progress",
+            "txt",
+            std::io::Cursor::new(plaintext.clone()),
+            plaintext.len() as u64,
+            callback,
+        )
+        .unwrap();
+    assert_eq!(digest, sha256_hex(&plaintext));
+    verify_sha256(&plaintext, &digest).unwrap();
+    assert_eq!(uploaded.lock().unwrap().len(), plaintext.len());
+    let seen = seen.lock().unwrap();
+    let last = seen.last().expect("progress was reported");
+    assert_eq!(last.path, PathBuf::from("progress"));
+    assert_eq!(last.completed_bytes, plaintext.len() as u64);
+    assert_eq!(last.total_bytes, plaintext.len() as u64);
+    assert_eq!(last.files_completed, 1);
+}
+
+#[test]
+fn generic_progress_closure_still_accepted_for_upload_and_download() {
+    let bucket = "00".repeat(12);
+    let index = [9u8; 32];
+    let plaintext = b"download through a sorter-style progress callback".to_vec();
+    let mut ciphertext = plaintext.clone();
+    let session_template = generic_session("127.0.0.1:1".parse().unwrap(), &bucket);
+    crypt(
+        &mut ciphertext,
+        &session_template.mnemonic,
+        &session_template.bucket_bytes().unwrap(),
+        &index,
+    );
+    let (address, _) =
+        spawn_generic_transfer_server(bucket.clone(), index, ciphertext, plaintext.len());
+    let session = generic_session(address, &bucket);
+    let client = InternxtNativeClient::new(&session.drive_api_url, session.active_token()).unwrap();
+
+    // ProgressCallback (Arc<dyn Fn(TransferProgress)>) variant.
+    let (callback, seen) = recording_callback();
+    let mut output = Vec::new();
+    let total = client
+        .download_file_to_writer_with_progress_callback(&session, "file", &mut output, callback)
+        .unwrap();
+    assert_eq!(total, plaintext.len() as u64);
+    assert_eq!(output, plaintext);
+    let last = seen.lock().unwrap().last().cloned().expect("progress");
+    assert_eq!(last.path, PathBuf::from("file"));
+    assert_eq!(last.completed_bytes, plaintext.len() as u64);
+    assert_eq!(last.files_completed, 1);
+
+    // Plain FnMut(u64, u64) closures remain the primary generic API.
+    let mut reports = Vec::new();
+    let mut output = Vec::new();
+    client
+        .download_file_to_writer_with_progress(&session, "file", &mut output, |done, all| {
+            reports.push((done, all))
+        })
+        .unwrap();
+    assert_eq!(output, plaintext);
+    assert_eq!(
+        reports.last().copied(),
+        Some((plaintext.len() as u64, plaintext.len() as u64))
+    );
 }
 
 fn unique_path(label: &str) -> PathBuf {

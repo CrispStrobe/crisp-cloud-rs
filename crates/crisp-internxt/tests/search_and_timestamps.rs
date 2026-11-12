@@ -191,3 +191,81 @@ fn plain_folder_creation_sends_no_times() {
         serde_json::json!({"plainName": "Docs", "parentFolderUuid": "parent"})
     );
 }
+
+/// Serve `replies` (status line, body) in order, one connection each,
+/// returning how many requests arrived.
+fn serve_sequence(
+    replies: Vec<(&'static str, &'static str)>,
+) -> (String, thread::JoinHandle<usize>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let handle = thread::spawn(move || {
+        let mut served = 0;
+        for (status, body) in replies {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut length = 0;
+            loop {
+                let mut header = String::new();
+                reader.read_line(&mut header).unwrap();
+                if header == "\r\n" {
+                    break;
+                }
+                if let Some(v) = header.to_ascii_lowercase().strip_prefix("content-length:") {
+                    length = v.trim().parse().unwrap();
+                }
+            }
+            let mut sink = vec![0; length];
+            reader.read_exact(&mut sink).unwrap();
+            let mut stream = stream;
+            write!(
+                stream,
+                "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+            served += 1;
+        }
+        served
+    });
+    (base, handle)
+}
+
+#[test]
+fn transient_gateway_errors_are_retried() {
+    let (base, server) = serve_sequence(vec![
+        ("502 Bad Gateway", r#"{"type":"cloudflare"}"#),
+        ("200 OK", r#"{"data":[]}"#),
+    ]);
+    let client = InternxtNativeClient::new(&base, "tok").unwrap();
+    assert!(client
+        .fuzzy_search("report", 0, &FuzzySearchFilters::default())
+        .unwrap()
+        .is_empty());
+    assert_eq!(server.join().unwrap(), 2);
+}
+
+#[test]
+fn persistent_gateway_errors_surface_after_three_attempts() {
+    let (base, server) = serve_sequence(vec![
+        ("503 Service Unavailable", "{}"),
+        ("503 Service Unavailable", "{}"),
+        ("503 Service Unavailable", "{}"),
+    ]);
+    let client = InternxtNativeClient::new(&base, "tok").unwrap();
+    let error = client
+        .fuzzy_search("report", 0, &FuzzySearchFilters::default())
+        .unwrap_err();
+    assert!(error.to_string().contains("503"), "{error}");
+    assert_eq!(server.join().unwrap(), 3);
+}
+
+#[test]
+fn client_errors_are_not_retried() {
+    let (base, server) = serve_sequence(vec![("404 Not Found", r#"{"message":"gone"}"#)]);
+    let client = InternxtNativeClient::new(&base, "tok").unwrap();
+    assert!(client
+        .fuzzy_search("report", 0, &FuzzySearchFilters::default())
+        .is_err());
+    assert_eq!(server.join().unwrap(), 1);
+}

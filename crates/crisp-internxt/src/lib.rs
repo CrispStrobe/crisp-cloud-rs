@@ -1147,13 +1147,14 @@ impl InternxtNativeClient {
     }
 
     fn bearer_response(&self, method: reqwest::Method, url: &str) -> Result<Response> {
-        self.http
-            .request(method, url)
-            .bearer_auth(&self.bearer_token)
-            .header("accept", "application/json")
-            .header("internxt-client", "internxt-cli")
-            .send()
-            .with_context(|| format!("requesting Internxt drive endpoint: {url}"))
+        send_with_gateway_retry(|| {
+            self.http
+                .request(method.clone(), url)
+                .bearer_auth(&self.bearer_token)
+                .header("accept", "application/json")
+                .header("internxt-client", "internxt-cli")
+        })
+        .with_context(|| format!("requesting Internxt drive endpoint: {url}"))
     }
 
     fn bridge_response(
@@ -1163,21 +1164,22 @@ impl InternxtNativeClient {
         session: &InternxtSession,
         body: Option<Vec<u8>>,
     ) -> Result<Response> {
-        let mut request = self
-            .http
-            .request(method, url)
-            .basic_auth(&session.bridge_user, Some(session.bridge_pass()))
-            .header("x-api-version", "2")
-            .header("accept", "application/json")
-            .header("internxt-client", "internxt-cli");
-        if let Some(body) = body {
-            request = request
-                .header("content-type", "application/json")
-                .body(body);
-        }
-        request
-            .send()
-            .with_context(|| format!("requesting Internxt network endpoint: {url}"))
+        send_with_gateway_retry(|| {
+            let request = self
+                .http
+                .request(method.clone(), url)
+                .basic_auth(&session.bridge_user, Some(session.bridge_pass()))
+                .header("x-api-version", "2")
+                .header("accept", "application/json")
+                .header("internxt-client", "internxt-cli");
+            match &body {
+                Some(body) => request
+                    .header("content-type", "application/json")
+                    .body(body.clone()),
+                None => request,
+            }
+        })
+        .with_context(|| format!("requesting Internxt network endpoint: {url}"))
     }
 
     pub fn file_metadata(&self, file_uuid: &str) -> Result<serde_json::Value> {
@@ -1227,7 +1229,18 @@ impl InternxtNativeClient {
             .ok_or_else(|| anyhow!("replacement upload was not visible in its parent folder"))?;
         let result = (|| {
             self.trash(file_uuid, "file")?;
-            self.rename_file(&temporary.uuid, plain_name, file_type)
+            // The trashed original can stay visible to the name-uniqueness
+            // check for a moment, so the rename may 409 right after trash.
+            let mut attempt = 0;
+            loop {
+                match self.rename_file(&temporary.uuid, plain_name, file_type) {
+                    Err(error) if attempt < 8 && error.to_string().contains("409") => {
+                        attempt += 1;
+                        std::thread::sleep(Duration::from_millis(750));
+                    }
+                    other => break other,
+                }
+            }
         })();
         if result.is_err() {
             let _ = self.trash(&temporary.uuid, "file");
@@ -2903,15 +2916,16 @@ impl InternxtNativeClient {
         url: &str,
         body: Vec<u8>,
     ) -> Result<Response> {
-        self.http
-            .request(method, url)
-            .bearer_auth(&self.bearer_token)
-            .header("accept", "application/json")
-            .header("internxt-client", "internxt-cli")
-            .header("content-type", "application/json")
-            .body(body)
-            .send()
-            .with_context(|| format!("requesting Internxt drive endpoint: {url}"))
+        send_with_gateway_retry(|| {
+            self.http
+                .request(method.clone(), url)
+                .bearer_auth(&self.bearer_token)
+                .header("accept", "application/json")
+                .header("internxt-client", "internxt-cli")
+                .header("content-type", "application/json")
+                .body(body.clone())
+        })
+        .with_context(|| format!("requesting Internxt drive endpoint: {url}"))
     }
 
     /// List all files and folders directly below [folder_uuid].
@@ -3702,6 +3716,27 @@ fn wildcard_matches(value: &str, pattern: &str, case_sensitive: bool) -> bool {
         previous = current;
     }
     previous[pattern.len()]
+}
+
+/// Status codes from Cloudflare / the Internxt gateway that mean "try again".
+fn is_transient_gateway_status(status: reqwest::StatusCode) -> bool {
+    matches!(status.as_u16(), 502 | 503 | 504)
+}
+
+/// Send a request, retrying up to twice (0.5 s, 1.5 s) when the gateway
+/// answers 502/503/504. Other statuses and transport errors are returned.
+fn send_with_gateway_retry(
+    build: impl Fn() -> reqwest::blocking::RequestBuilder,
+) -> reqwest::Result<Response> {
+    let delays = [Duration::from_millis(500), Duration::from_millis(1500)];
+    for delay in delays {
+        let response = build().send()?;
+        if !is_transient_gateway_status(response.status()) {
+            return Ok(response);
+        }
+        std::thread::sleep(delay);
+    }
+    build().send()
 }
 
 /// Local times for an item created on Internxt (birth time where the

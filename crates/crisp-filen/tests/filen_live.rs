@@ -281,3 +281,44 @@ fn filen_live_native_mutations() {
     client.restore(&folder_uuid, "folder").unwrap();
     client.trash(&folder_uuid, "folder").unwrap();
 }
+
+/// Empty files are uploaded through `/v3/upload/empty` and have no chunk;
+/// downloading one must not request a missing chunk 0 (404).
+#[test]
+#[ignore = "requires FILEN_EMAIL/FILEN_PASSWORD; mutates a real account"]
+fn filen_live_empty_file_round_trip() {
+    let Some(email) = env::var("FILEN_EMAIL").ok().filter(|v| !v.is_empty()) else {
+        eprintln!("skipping Filen live test: set FILEN_EMAIL and FILEN_PASSWORD");
+        return;
+    };
+    let Some(password) = env::var("FILEN_PASSWORD").ok().filter(|v| !v.is_empty()) else {
+        eprintln!("skipping Filen live test: set FILEN_EMAIL and FILEN_PASSWORD");
+        return;
+    };
+    let session = FilenNativeClient::login(
+        DEFAULT_GATEWAY_URL,
+        &email,
+        &password,
+        env::var("FILEN_TFA").ok().as_deref(),
+    )
+    .unwrap_or_else(|error| panic!("Filen live login failed: {error:#}"));
+    let client = FilenNativeClient::from_session(&session).unwrap();
+    let folder = format!("_crisp_cloud_rs_live_{}_empty", std::process::id());
+    let folder_uuid = client
+        .create_folder(&session.root_folder_uuid, &folder)
+        .unwrap();
+    let result = (|| -> anyhow::Result<()> {
+        client.upload_file(&folder_uuid, "empty.txt", "text/plain", &[])?;
+        let item = client.resolve_path(
+            &session,
+            std::path::Path::new(&format!("/{folder}/empty.txt")),
+        )?;
+        anyhow::ensure!(item.size == 0, "empty file listed with size {}", item.size);
+        let mut out = Vec::new();
+        let written = client.download_file_to_writer(&item, &mut out)?;
+        anyhow::ensure!(written == 0 && out.is_empty(), "downloaded {written} bytes");
+        Ok(())
+    })();
+    let _ = client.trash(&folder_uuid, "folder");
+    result.map_err(|e| format!("{e:#}")).unwrap();
+}

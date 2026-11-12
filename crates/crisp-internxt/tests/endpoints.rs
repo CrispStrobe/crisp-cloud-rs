@@ -182,7 +182,8 @@ fn trash_listing_keeps_file_extension_and_exact_uuid() {
         let path = request_path(&mut stream);
         assert!(path.starts_with("/storage/trash/paginated?"));
         assert!(path.contains("limit=50"));
-        let body = r#"{"result":[{"uuid":"deleted-object","plainName":"report","type":"pdf","size":42}]}"#;
+        let body =
+            r#"{"result":[{"uuid":"deleted-object","plainName":"report","type":"pdf","size":42}]}"#;
         write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
     });
     let client = InternxtNativeClient::new(format!("http://{address}"), "fixture-token").unwrap();
@@ -200,8 +201,14 @@ fn trash_listing_all_kinds_preserves_folders_and_extensionless_files() {
     let address = listener.local_addr().unwrap();
     let server = thread::spawn(move || {
         for (kind, body) in [
-            ("files", r#"{"result":[{"uuid":"empty-type","plainName":"README","type":""},{"uuid":"null-type","plainName":"LICENSE","type":null},{"uuid":"missing-type","name":"NOTICE"}]}"#),
-            ("folders", r#"{"result":[{"uuid":"folder","plainName":"Docs","type":"pdf"}]}"#),
+            (
+                "files",
+                r#"{"result":[{"uuid":"empty-type","plainName":"README","type":""},{"uuid":"null-type","plainName":"LICENSE","type":null},{"uuid":"missing-type","name":"NOTICE"}]}"#,
+            ),
+            (
+                "folders",
+                r#"{"result":[{"uuid":"folder","plainName":"Docs","type":"pdf"}]}"#,
+            ),
         ] {
             let (mut stream, _) = listener.accept().unwrap();
             let path = request_path(&mut stream);
@@ -213,10 +220,20 @@ fn trash_listing_all_kinds_preserves_folders_and_extensionless_files() {
     });
     let client = InternxtNativeClient::new(format!("http://{address}"), "fixture-token").unwrap();
     let items = client.list_trash(None, 50).unwrap();
-    assert_eq!(items.iter().map(|item| item.name.as_str()).collect::<Vec<_>>(),
-        ["README", "LICENSE", "NOTICE", "Docs"]);
-    assert_eq!(items.iter().map(|item| item.uuid.as_str()).collect::<Vec<_>>(),
-        ["empty-type", "null-type", "missing-type", "folder"]);
+    assert_eq!(
+        items
+            .iter()
+            .map(|item| item.name.as_str())
+            .collect::<Vec<_>>(),
+        ["README", "LICENSE", "NOTICE", "Docs"]
+    );
+    assert_eq!(
+        items
+            .iter()
+            .map(|item| item.uuid.as_str())
+            .collect::<Vec<_>>(),
+        ["empty-type", "null-type", "missing-type", "folder"]
+    );
     assert!(items[..3].iter().all(|item| !item.is_dir));
     assert!(items[3].is_dir);
     server.join().unwrap();
@@ -228,8 +245,14 @@ fn trash_listing_preserves_full_names_and_ids_across_pages() {
     let address = listener.local_addr().unwrap();
     let server = thread::spawn(move || {
         for (offset, body) in [
-            (0, r#"{"result":[{"uuid":"first-report","plainName":"report","type":"pdf"},{"uuid":"readme","plainName":"README","type":""}]}"#),
-            (2, r#"{"result":[{"uuid":"second-report","plainName":"report","type":"pdf"}]}"#),
+            (
+                0,
+                r#"{"result":[{"uuid":"first-report","plainName":"report","type":"pdf"},{"uuid":"readme","plainName":"README","type":""}]}"#,
+            ),
+            (
+                2,
+                r#"{"result":[{"uuid":"second-report","plainName":"report","type":"pdf"}]}"#,
+            ),
         ] {
             let (mut stream, _) = listener.accept().unwrap();
             let path = request_path(&mut stream);
@@ -242,10 +265,20 @@ fn trash_listing_preserves_full_names_and_ids_across_pages() {
     });
     let client = InternxtNativeClient::new(format!("http://{address}"), "fixture-token").unwrap();
     let items = client.list_trash(Some("files"), 2).unwrap();
-    assert_eq!(items.iter().map(|item| item.name.as_str()).collect::<Vec<_>>(),
-        ["report.pdf", "README", "report.pdf"]);
-    assert_eq!(items.iter().map(|item| item.uuid.as_str()).collect::<Vec<_>>(),
-        ["first-report", "readme", "second-report"]);
+    assert_eq!(
+        items
+            .iter()
+            .map(|item| item.name.as_str())
+            .collect::<Vec<_>>(),
+        ["report.pdf", "README", "report.pdf"]
+    );
+    assert_eq!(
+        items
+            .iter()
+            .map(|item| item.uuid.as_str())
+            .collect::<Vec<_>>(),
+        ["first-report", "readme", "second-report"]
+    );
     assert!(items.iter().all(|item| !item.is_dir));
     server.join().unwrap();
 }

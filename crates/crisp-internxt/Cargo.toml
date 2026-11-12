@@ -40,3 +40,6 @@ sha2 = "0.10"
 unicode-normalization = "0.1"
 
 [dev-dependencies]
+# Independent MIT implementation, used only to cross-check key derivation in
+# tests; the production client stays self-contained.
+internxt-core = { version = "=0.1.3", default-features = false }

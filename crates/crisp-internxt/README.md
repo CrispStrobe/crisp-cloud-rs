@@ -32,8 +32,9 @@ This crate is deliberately focused on the file-system-facing Drive workflow:
 
 It is intentionally independent of the general-purpose `internxt-core-rust`
 reference implementation. That project is useful as a protocol and crypto
-oracle; this crate owns path semantics, transfer policy, resume behavior, and
-the CLI needed by CrispSorter.
+oracle (a dev-dependency here cross-checks key derivation against it); this
+crate owns path semantics, transfer policy, resume behavior, and the CLI
+needed by CrispSorter.
 
 ## Install
 
@@ -157,7 +158,10 @@ fn example(session: &InternxtSession) -> anyhow::Result<()> {
 ```
 
 The public API also includes `crypt_at` for aligned random-access CTR
-processing, `download_file_to_path_ranged`, `TransferOptions`, progress
+processing, `download_file_range` (decrypt any byte range from one HTTP
+range, streaming past the prefix when a shard ignores `Range`),
+`download_file_to_path_ranged`, `update_file` / `update_file_from_reader`
+(upload beside the original, then swap), `TransferOptions`, progress
 callbacks, and explicit `UploadResumeState` load/save/clear methods.
 
 ## Crypto compatibility

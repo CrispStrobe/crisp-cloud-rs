@@ -3683,12 +3683,9 @@ impl InternxtNativeClient {
                 let count = values.len();
                 for item in values {
                     all.push(NativeItem {
-                        name: item
-                            .get("plainName")
-                            .or_else(|| item.get("name"))
-                            .and_then(|value| value.as_str())
-                            .unwrap_or("?")
-                            .to_owned(),
+                        // Keep trash metadata identical to live folder listings:
+                        // the gateway separates plainName and the extension.
+                        name: item_name(&item, requested_kind),
                         uuid: item
                             .get("uuid")
                             .or_else(|| item.get("id"))

@@ -172,3 +172,24 @@ fn expired_bearer_token_refreshes_and_retries_once() {
     assert_eq!(session.new_token, "refreshed-new");
     server.join().unwrap();
 }
+
+#[test]
+fn trash_listing_keeps_file_extension_and_exact_uuid() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let path = request_path(&mut stream);
+        assert!(path.starts_with("/storage/trash/paginated?"));
+        assert!(path.contains("limit=50"));
+        let body = r#"{"result":[{"uuid":"deleted-object","plainName":"report","type":"pdf","size":42}]}"#;
+        write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).unwrap();
+    });
+    let client = InternxtNativeClient::new(format!("http://{address}"), "fixture-token").unwrap();
+    let items = client.list_trash(Some("files"), 50).unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].uuid, "deleted-object");
+    assert_eq!(items[0].name, "report.pdf");
+    assert!(!items[0].is_dir);
+    server.join().unwrap();
+}

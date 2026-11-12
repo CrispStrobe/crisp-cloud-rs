@@ -56,6 +56,98 @@ fn live_search_copy_and_update_round_trip() {
     run_search_copy_update(&email, &password, tfa.as_deref()).unwrap();
 }
 
+#[test]
+#[ignore = "mutates a real Internxt account; run explicitly with --ignored"]
+fn live_fuzzy_search_and_creation_timestamps() {
+    let Some((email, password, tfa)) = credentials() else {
+        eprintln!("skipping: no Internxt credentials");
+        return;
+    };
+    run_fuzzy_and_times(&email, &password, tfa.as_deref()).unwrap();
+}
+
+fn run_fuzzy_and_times(email: &str, password: &str, tfa: Option<&str>) -> Result<()> {
+    use crisp_internxt::{FuzzySearchFilters, ItemTimes, TimestampUpdateUnsupported};
+    let session =
+        InternxtNativeClient::login_without_keys(DEFAULT_DRIVE_API_URL, email, password, tfa)?;
+    let client = InternxtNativeClient::new(&session.drive_api_url, &session.new_token)?;
+    let folder_name = unique_name("crisp rust fuzzy");
+    let times = ItemTimes {
+        creation_time: Some("2020-02-03T04:05:06.000Z".into()),
+        modification_time: Some("2021-06-01T08:15:30.000Z".into()),
+    };
+    let folder_uuid =
+        client.create_folder_with_times(&session.root_folder_id, &folder_name, &times)?;
+    let result = (|| -> Result<()> {
+        // Folder times are honoured only at creation.
+        let meta = (0..8)
+            .find_map(|_| {
+                client.folder_metadata(&folder_uuid).ok().or_else(|| {
+                    std::thread::sleep(std::time::Duration::from_millis(1500));
+                    None
+                })
+            })
+            .context("folder metadata never appeared")?;
+        let at = |key: &str| {
+            chrono::DateTime::parse_from_rfc3339(meta[key].as_str().unwrap_or_default())
+                .map(|t| t.timestamp())
+        };
+        assert_eq!(at("modificationTime")?, 1622535330);
+        assert_eq!(at("creationTime")?, 1580702706);
+        let error = client
+            .set_folder_timestamp(&folder_uuid, "2019-01-01T00:00:00Z")
+            .unwrap_err();
+        assert!(error.downcast_ref::<TimestampUpdateUnsupported>().is_some());
+
+        // Upload a uniquely named file inside the scoped entry times, then
+        // find it with the server search (indexing can lag a little).
+        let token = unique_name("crispfuzzy").replace([' ', '-'], "");
+        let local = std::env::temp_dir().join(format!("{token}.txt"));
+        std::fs::write(&local, b"fuzzy")?;
+        client.with_entry_times(times.clone(), || {
+            client.upload_path(&session, &folder_uuid, &token, "txt", &local)
+        })?;
+        let _ = std::fs::remove_file(&local);
+        let mut found = Vec::new();
+        for _ in 0..10 {
+            found = client.fuzzy_search(&token, 0, &FuzzySearchFilters::default())?;
+            if found.iter().any(|hit| hit.name.starts_with(&token)) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
+        let hit = found
+            .iter()
+            .find(|hit| hit.name.starts_with(&token))
+            .context("uploaded file not found by fuzzy search")?;
+        assert_eq!(hit.item_type, "file");
+        let typed = client.fuzzy_search(
+            &token,
+            0,
+            &FuzzySearchFilters {
+                types: vec!["pdf".into()],
+                ..Default::default()
+            },
+        )?;
+        assert!(
+            typed.iter().all(|h| h.item_id != hit.item_id),
+            "pdf filter excludes .txt"
+        );
+        let file = client.file_metadata(&hit.item_id)?;
+        let modified = chrono::DateTime::parse_from_rfc3339(
+            file["modificationTime"].as_str().unwrap_or_default(),
+        )?;
+        assert_eq!(
+            modified.timestamp(),
+            1622535330,
+            "file entry keeps upload-time mtime"
+        );
+        Ok(())
+    })();
+    let _ = client.trash(&folder_uuid, "folder");
+    result
+}
+
 fn run_search_copy_update(email: &str, password: &str, tfa: Option<&str>) -> Result<()> {
     let session =
         InternxtNativeClient::login_without_keys(DEFAULT_DRIVE_API_URL, email, password, tfa)?;
@@ -105,22 +197,17 @@ fn run_search_copy_update(email: &str, password: &str, tfa: Option<&str>) -> Res
         let downloaded = std::env::temp_dir().join(unique_name("crispsorter-lifecycle-download"));
         client.download_file_to_path(&session, &updated.uuid, &downloaded)?;
         assert_eq!(std::fs::read(downloaded)?, b"after");
-        let file_timestamp = client.set_file_timestamp(&updated.uuid, "2026-07-31T12:00:00.000Z");
-        assert!(file_timestamp
-            .as_ref()
-            .err()
-            .map(|error| error.to_string().contains("409"))
-            .unwrap_or(false));
-        let folder_timestamp =
-            client.set_folder_timestamp(&source_uuid, "2026-07-31T12:00:00.000Z");
-        assert!(
-            folder_timestamp.is_ok()
-                || folder_timestamp
-                    .as_ref()
-                    .err()
-                    .map(|error| error.to_string().contains("409"))
-                    .unwrap_or(false)
-        );
+        // Internxt accepts times only at creation/upload; updates are
+        // reported as unsupported without a request.
+        for result in [
+            client.set_file_timestamp(&updated.uuid, "2026-07-31T12:00:00.000Z"),
+            client.set_folder_timestamp(&source_uuid, "2026-07-31T12:00:00.000Z"),
+        ] {
+            let error = result.expect_err("timestamp updates are unsupported");
+            assert!(error
+                .downcast_ref::<crisp_internxt::TimestampUpdateUnsupported>()
+                .is_some());
+        }
         Ok(())
     })();
     let _ = std::fs::remove_file(source_path);

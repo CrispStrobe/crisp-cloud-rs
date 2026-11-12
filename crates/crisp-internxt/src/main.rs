@@ -626,7 +626,7 @@ fn print_item(item: &NativeItem) {
 fn split_name(name: &str) -> (&str, &str) {
     match name.rsplit_once('.') {
         Some((stem, ext)) if !stem.is_empty() => (stem, ext),
-        _ => (name, "file"),
+        _ => (name, ""),
     }
 }
 
@@ -659,7 +659,7 @@ mod tests {
     #[test]
     fn splits_extensionless_and_dotted_names_safely() {
         assert_eq!(split_name("photo.jpg"), ("photo", "jpg"));
-        assert_eq!(split_name("README"), ("README", "file"));
-        assert_eq!(split_name(".profile"), (".profile", "file"));
+        assert_eq!(split_name("README"), ("README", ""));
+        assert_eq!(split_name(".profile"), (".profile", ""));
     }
 }

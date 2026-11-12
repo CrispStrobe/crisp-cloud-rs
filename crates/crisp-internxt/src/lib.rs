@@ -1209,27 +1209,16 @@ impl InternxtNativeClient {
             .ok_or_else(|| anyhow!("Internxt storage limit response has no byte count"))
     }
 
-    /// Server-side name search across the whole drive, as the Internxt web
-    /// app does: `POST /fuzzy/{search}` with `{"offset": n}`. Results come
-    /// from Internxt's search index, which can lag behind recent changes.
-    pub fn fuzzy_search(&self, query: &str, offset: usize) -> Result<Vec<SearchHit>> {
-        let query = query.trim();
-        anyhow::ensure!(!query.is_empty(), "search query is empty");
-        let mut url = reqwest::Url::parse(&format!("{}/fuzzy/", self.base_url))
-            .context("building Internxt search URL")?;
-        url.path_segments_mut()
-            .map_err(|_| anyhow!("Internxt search URL cannot take a path"))?
-            .pop_if_empty()
-            .push(query);
-        let url = url.to_string();
-        let body = serde_json::to_vec(&serde_json::json!({ "offset": offset }))?;
-        let response = self.bearer_request(reqwest::Method::POST, &url, body)?;
-        let value = self.json_response(response, &url)?;
-        Ok(value
-            .get("data")
-            .and_then(|v| v.as_array())
-            .map(|items| items.iter().filter_map(SearchHit::from_json).collect())
-            .unwrap_or_default())
+    /// Search without additional filters, retaining the compact result shape.
+    pub fn fuzzy_search_unfiltered(&self, query: &str, offset: usize) -> Result<Vec<SearchHit>> {
+        self.fuzzy_search(query, offset as u64, &FuzzySearchFilters::default())?
+            .into_iter()
+            .map(|hit| {
+                let value = serde_json::to_value(hit)?;
+                SearchHit::from_json(&value)
+                    .ok_or_else(|| anyhow!("Internxt search result lacks its compact identity"))
+            })
+            .collect()
     }
 
     /// Parent folders of `folder_uuid` (`GET /folders/{uuid}/ancestors`),
@@ -2065,30 +2054,17 @@ impl InternxtNativeClient {
             self.upload_network_reader_with_progress(session, reader, file_size, progress)?;
         self.register_file(
             parent_folder_uuid,
-            &serde_json::json!({
+            &self.with_times(serde_json::json!({
                 "folderUuid": parent_folder_uuid, "plainName": plain_name,
                 "type": file_type, "size": file_size, "bucket": session.bucket_id,
                 "fileId": network_file_id, "encryptVersion": "Aes03", "name": ""
-            }),
+            })),
         )?;
         self.clear_listing_cache();
         Ok(plain_sha256)
     }
 
-    /// Encrypt and upload content to the storage network only; returns the
-    /// network file id. The drive entry is created or replaced separately.
-    fn upload_network_reader<R: Read>(
-        &self,
-        session: &InternxtSession,
-        reader: R,
-        file_size: u64,
-    ) -> Result<String> {
-        self.upload_network_reader_with_progress(session, reader, file_size, |_, _| {})
-            .map(|(network_file_id, _)| network_file_id)
-    }
-
-    /// [`Self::upload_network_reader`] with plaintext byte progress; also
-    /// returns the plaintext SHA-256.
+    /// Encrypt streaming content and return its network identifier and plaintext digest.
     fn upload_network_reader_with_progress<R: Read, F: FnMut(u64, u64)>(
         &self,
         session: &InternxtSession,
@@ -2233,21 +2209,10 @@ impl InternxtNativeClient {
             .get("id")
             .and_then(|value| value.as_str())
             .ok_or_else(|| anyhow!("Internxt upload finish returned no file id"))?;
-        let create_url = format!("{}/files", self.base_url);
-        self.json_response(
-            self.bearer_request(
-                reqwest::Method::POST,
-                &create_url,
-                serde_json::to_vec(&self.with_times(serde_json::json!({
-                    "folderUuid": parent_folder_uuid, "plainName": plain_name,
-                    "type": file_type, "size": file_size, "bucket": session.bucket_id,
-                    "fileId": network_file_id, "encryptVersion": "Aes03", "name": ""
-                })))?,
-            )?,
-            &create_url,
-        )?;
-        self.clear_listing_cache();
-        Ok(hex::encode(plain_sha.finalize()))
+        Ok((
+            network_file_id.to_owned(),
+            hex::encode(plain_sha.finalize()),
+        ))
     }
 
     /// Stream a local file into Internxt without buffering the complete
@@ -5072,7 +5037,7 @@ mod empty_file_tests {
     }
 }
 
-/// One result of [`InternxtNativeClient::fuzzy_search`].
+/// One result of [`InternxtNativeClient::fuzzy_search_unfiltered`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchHit {
     pub uuid: String,

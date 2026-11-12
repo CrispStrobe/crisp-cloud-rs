@@ -4,3 +4,11 @@
 *.session.json
 *.resume.json
 *.internxt-resume.json
+
+/conformance/generated/
+/conformance/dart/.dart_tool/
+/conformance/rust/target/
+/conformance/results/
+/conformance/dart/pubspec_overrides.yaml
+/conformance/__pycache__/
+/sdk/

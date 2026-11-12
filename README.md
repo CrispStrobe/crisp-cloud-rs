@@ -108,3 +108,10 @@ crypto vectors, but cloud-provider endpoints are not stable public standards.
 ## License
 
 Mozilla Public License 2.0. See [LICENSE](LICENSE).
+
+## Dart / Rust compatibility
+
+The [provider conformance suite](conformance/README.md) checks both language
+implementations against independent golden vectors, loopback HTTP mocks and
+cross-decrypted exports. Reports distinguish unexpected failures from exact
+compatibility gaps; unresolved gaps block changing the default engine.

@@ -121,3 +121,5 @@ The [provider conformance suite](conformance/README.md) checks both language
 implementations against independent golden vectors, loopback HTTP mocks and
 cross-decrypted exports. Reports distinguish unexpected failures from exact
 compatibility gaps; unresolved gaps block changing the default engine.
+
+Trash listings preserve each file extension and exact UUID using the same gateway name composition as live folder listings. Folders, extensionless files and pagination retain their separate contracts. The isolated endpoint harness covers these cases without contacting production accounts.

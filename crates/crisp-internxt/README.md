@@ -222,3 +222,29 @@ part PUTs but delay or intermittently reject the finalization request.
 ## License
 
 Licensed under the Mozilla Public License, version 2.0. See [LICENSE](LICENSE).
+
+## Receipt-backed one-shot mutations
+
+`trash_once(uuid, "file" | "folder")` and
+`restore_from_trash_once(uuid, "files" | "folders", destination_folder_uuid)`
+are additive APIs for applications that durably journal object/account identity
+before mutation. Each invocation sends one request: no gateway-status retry,
+protocol retry, redirect following or auth-refresh wrapper. Any error may mean
+that the server already applied the mutation; reconcile the exact UUID using
+read-only provider queries rather than replaying the request. An HTTP success
+is an acknowledgement, not independent proof of the object's observed state.
+
+The dedicated receipt client shares the ordinary client's builder for TLS
+secure defaults, proxy/auth configuration, user agent, HTTP version and
+connect/request timeouts. It only tightens retry and redirect policies. Local
+listing caches and recent-write overlays for the affected UUID are invalidated
+without synthesizing a successful remote observation. Legacy mutation APIs and
+their retry behavior are unchanged; do not use them behind a no-replay receipt
+contract or wrap the new methods in an automatic retry/refresh closure.
+
+The hermetic `receipt_once` test target checks lost responses after complete
+request receipt, HTTP 502/503/504 and 401, redirects, request timeout, proxy
+credentials, folder operations and escaped UUID/destination payloads. It also
+seeds real SDK added/hidden overlays and cached listings, then verifies that
+success, gateway error and lost response each invalidate them. These are
+loopback fixtures, not live accounts.

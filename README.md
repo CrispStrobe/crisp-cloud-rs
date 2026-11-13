@@ -93,6 +93,12 @@ cargo package -p crisp-internxt --allow-dirty
 cargo package -p crisp-filen --allow-dirty
 ```
 
+Receipt mutation fixtures also exercise fragmented HTTP requests and accepted
+nonblocking sockets, including the Windows listener-inheritance case. Their
+bounded blocking reads prevent fixture timing from being mistaken for a client
+retry or replay. Production request timeouts, retry and redirect policy remain
+covered separately.
+
 Authenticated tests are ignored by default because they create remote data.
 See each backend README for the required environment variables and cleanup
 behavior. Use a dedicated test account or test folder.

@@ -22,6 +22,9 @@ enum Mutation {
 }
 
 fn read_request(stream: &mut TcpStream) -> String {
+    // Windows accepted sockets can inherit the listener's nonblocking mode.
+    // Poll accept independently, but read each request in bounded blocking mode.
+    stream.set_nonblocking(false).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(1)))
         .unwrap();
@@ -46,6 +49,39 @@ fn read_request(stream: &mut TcpStream) -> String {
             }
         }
     }
+}
+
+#[test]
+fn accepted_nonblocking_stream_reads_the_entire_fragmented_request() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (mut accepted, _) = listener.accept().unwrap();
+    // Reproduce the inherited Windows listener mode on every platform.
+    accepted.set_nonblocking(true).unwrap();
+    assert_eq!(
+        accepted.peek(&mut [0u8; 1]).unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    let writer = thread::spawn(move || {
+        // Leave the reader waiting for both the first bytes and the final body;
+        // no complete request may be assumed available immediately after accept.
+        thread::sleep(Duration::from_millis(50));
+        client
+            .write_all(b"POST /fixture HTTP/1.1\r\nContent-Length: 4\r\n")
+            .unwrap();
+        thread::sleep(Duration::from_millis(25));
+        client.write_all(b"\r\nbody").unwrap();
+    });
+    let request = read_request(&mut accepted);
+    writer.join().unwrap();
+    assert_eq!(
+        request,
+        "POST /fixture HTTP/1.1\r\nContent-Length: 4\r\n\r\nbody"
+    );
+    assert_eq!(
+        accepted.read_timeout().unwrap(),
+        Some(Duration::from_secs(1))
+    );
 }
 
 /// status=None means the mutation was received completely, then its response
